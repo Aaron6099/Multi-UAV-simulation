@@ -1,4 +1,39 @@
+# ROS2 build artifacts
 build/
 install/
 log/
-.colcon/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Compile artifacts
+compile_commands.json
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.bag
+
+# PX4 official packages (not part of this repo)
+src/px4_msgs/
+src/px4_ros_com/
+
+# PX4 official packages (clone separately)
+src/px4_msgs/
+src/px4_ros_com/
