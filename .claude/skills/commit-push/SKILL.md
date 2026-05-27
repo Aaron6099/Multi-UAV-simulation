@@ -19,7 +19,7 @@ disable-model-invocation: false
 
 4. 执行：
    ```
-   git -C "C:/Users/Aaron/Desktop/5机仿真" add mpc_node.py swarm_launch.py leader_node.py start_9_px4.sh CLAUDE.md
+   git -C "C:/Users/Aaron/Desktop/5机仿真" add mpc_node.py swarm_launch.py leader_node.py start_9_px4.sh start_1_px4.sh start_2_px4.sh start_3_px4.sh diag_monitor.py CLAUDE.md
    git -C "C:/Users/Aaron/Desktop/5机仿真" commit -m "<确认的 commit 信息>"
    git -C "C:/Users/Aaron/Desktop/5机仿真" push origin main
    ```
