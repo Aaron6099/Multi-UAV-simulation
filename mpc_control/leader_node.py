@@ -111,6 +111,8 @@ class LeaderNode(Node):
     def _tick(self):
         t = self._t
         self._t += self._dt
+        # 读取运行时参数（支持 ros2 param set 动态切换）
+        self._mode = str(self.get_parameter('mode').value)
 
         if self._mode == 'circle':
             omega = self._speed / max(self._radius, 0.1)
