@@ -1,119 +1,203 @@
-完整操作命令（按顺序在四个终端中执行）
+完整操作命令（按顺序在终端中执行）
 
-步骤0：清理残留进程（每次启动前执行一次）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+步骤0：每次启动前清理残留进程
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-pkill -f px4
-pkill -f gz
-pkill -f MicroXRCEAgent
-pkill -f ros2
+pkill -f px4; pkill -f gz; pkill -f MicroXRCEAgent; pkill -f ros2
 
-终端1：启动 Gazebo
-gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
 
-终端2：启动 PX4 实例（9架，适用所有队形）
-START_DELAY=10 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+更新代码（改完代码后执行）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-终端3：启动 MicroXRCEAgent
-MicroXRCEAgent udp4 -p 8888
-
-终端4：编译并启动编队控制器
+cd ~/ros2_control_mpc_ws/src/mpc_control && git pull origin main
+cp mpc_node.py     mpc_control/mpc_node.py
+cp leader_node.py  mpc_control/leader_node.py
+cp swarm_launch.py launch/swarm_launch.py
+cp diag_monitor.py mpc_control/diag_monitor.py
 cd ~/ros2_control_mpc_ws
+rm -rf /tmp/acados_di_mpc_*
 colcon build --packages-select mpc_control
 source install/setup.bash
 
-========== 选择队形（三选一）==========
 
-【5机十字编队】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Phase 0】单机诊断 solo1  ← 必须先过这关
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+终端1：
+gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+
+终端2（等Gazebo出现画面后）：
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_1_px4.sh
+
+终端3：
+MicroXRCEAgent udp4 -p 8888
+
+终端4：
+cd ~/ros2_control_mpc_ws && source install/setup.bash
+ros2 launch mpc_control swarm_launch.py formation:=solo1
+
+终端5（诊断监控）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation solo1
+
+队形图（NED）：
+  0(中心 0,0)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Phase 1】双机诊断 pair2  ← solo1 稳定后执行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+终端1：
+gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+
+终端2：
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_2_px4.sh
+
+终端3：
+MicroXRCEAgent udp4 -p 8888
+
+终端4（悬停）：
+cd ~/ros2_control_mpc_ws && source install/setup.bash
+ros2 launch mpc_control swarm_launch.py formation:=pair2
+
+终端4（圆周 半径10m 速度1.5m/s）：
+ros2 launch mpc_control swarm_launch.py formation:=pair2 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
+
+终端4（直线 1m/s）：
+ros2 launch mpc_control swarm_launch.py formation:=pair2 leader_mode:=line leader_speed:=1.0
+
+终端5（诊断监控）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation pair2
+
+队形图（NED，间距3m）：
+  0(中心  0, 0)
+  1(南   -3, 0)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Phase 2】三机诊断 trio3  ← pair2 稳定后执行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+终端1：
+gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+
+终端2：
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_3_px4.sh
+
+终端3：
+MicroXRCEAgent udp4 -p 8888
+
+终端4（悬停）：
+cd ~/ros2_control_mpc_ws && source install/setup.bash
+ros2 launch mpc_control swarm_launch.py formation:=trio3
+
+终端4（圆周 半径10m 速度1.5m/s）：
+ros2 launch mpc_control swarm_launch.py formation:=trio3 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
+
+终端4（直线 1m/s）：
+ros2 launch mpc_control swarm_launch.py formation:=trio3 leader_mode:=line leader_speed:=1.0
+
+终端5（诊断监控）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation trio3
+
+队形图（NED，等边三角形 外接圆R=3m 边长≈5.196m）：
+       0(北 +3,0)
+      / \
+     /   \
+  2(西南) 1(东南)
+  (-1.5,-2.598) (-1.5,+2.598)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Phase 3】5机编队  ← trio3 稳定后执行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+终端1：
+gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+
+终端2：
+START_DELAY=10 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+
+终端3：
+MicroXRCEAgent udp4 -p 8888
+
+终端4（5机十字 悬停）：
+cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=cross5
 
-【5机星型编队（正五边形）】
+终端4（5机十字 圆周）：
+ros2 launch mpc_control swarm_launch.py formation:=cross5 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
+
+终端4（5机十字 直线）：
+ros2 launch mpc_control swarm_launch.py formation:=cross5 leader_mode:=line leader_speed:=1.0
+
+终端4（5机星型 悬停）：
 ros2 launch mpc_control swarm_launch.py formation:=star5
 
-【9机3×3方阵】
-ros2 launch mpc_control swarm_launch.py formation:=grid9
+终端4（5机星型 圆周）：
+ros2 launch mpc_control swarm_launch.py formation:=star5 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
 
-========================================
+终端5（诊断监控）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation cross5
 
-二、队形说明
-
-5机十字（cross5）：
+队形图 cross5（间距3m）：
         3(北)
    2(西) 0(中) 1(东)
         4(南)
-  间距3米，drone 0~4 参与编队
 
-5机星型（star5）：
-  0 (北, 0,3)
-  1 (东北, 2.85,0.93)
-  2 (东南, 1.76,-2.43)
-  3 (西南, -1.76,-2.43)
-  4 (西北, -2.85,0.93)
-  正五边形，半径3米，drone 0~4 参与编队
+队形图 star5（正五边形 R=3m）：
+  0(北  0,3)
+  1(东北 2.85,0.93)
+  2(东南 1.76,-2.43)
+  3(西南 -1.76,-2.43)
+  4(西北 -2.85,0.93)
 
-9机3×3方阵（grid9）：
+注意：5机模式下 drone 5~8 停在地面不参与编队，属正常现象。
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Phase 3】9机3×3方阵  ← cross5/star5 稳定后执行
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+终端4（悬停）：
+ros2 launch mpc_control swarm_launch.py formation:=grid9
+
+终端4（圆周）：
+ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
+
+终端4（直线）：
+ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=line leader_speed:=1.0
+
+终端5（诊断监控）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation grid9
+
+队形图 grid9（间距3m）：
   7(西北) 3(北) 5(东北)
   2(西)   0(中) 1(东)
   8(西南) 4(南) 6(东南)
-  间距3米，drone 0~8 全部参与编队
 
-注意：5机模式下 drone 5~8 会出现在 Gazebo 中但停在地面不参与编队，属正常现象。
 
-三、切换队形方法（不需要重启终端1/2/3）
-Ctrl+C 停止终端4，然后重新运行所选队形的 launch 命令。
-切换不同队形（如 cross5 → star5）不需要重新 colcon build。
-首次运行或修改代码后才需要重新编译。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+切换队形方法（不需要重启终端1/2/3）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-四、领队运动模式（修改 swarm_launch.py 中 leader_node 的参数）
+Ctrl+C 停止终端4 → 重新运行所选队形的 launch 命令
+切换队形不需要重新 colcon build
+修改代码后才需要重新编译
 
-5机十字（cross5）
-# 悬停
-ros2 launch mpc_control swarm_launch.py formation:=cross5
 
-# 匀速圆周 半径10m 速度1.5m/s
-ros2 launch mpc_control swarm_launch.py formation:=cross5 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+正常启动检查清单
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# 直线 1m/s
-ros2 launch mpc_control swarm_launch.py formation:=cross5 leader_mode:=line leader_speed:=1.0
-
-5机星型（star5）
-# 悬停
-ros2 launch mpc_control swarm_launch.py formation:=star5
-
-# 匀速圆周 半径10m 速度1.5m/s
-ros2 launch mpc_control swarm_launch.py formation:=star5 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
-
-# 直线 1m/s
-ros2 launch mpc_control swarm_launch.py formation:=star5 leader_mode:=line leader_speed:=1.0
-
-9机3×3方阵（grid9）
-# 悬停
-ros2 launch mpc_control swarm_launch.py formation:=grid9
- 
-# 匀速圆周 半径10m 速度1.5m/s
-ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
- 
-# 直线 1m/s
-ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=line leader_speed:=1.0
-
-# 换队形+换运动模式随意组合
-ros2 launch mpc_control swarm_launch.py formation:=star5 leader_mode:=circle leader_radius:=8.0
-
-悬停（默认）：
-  'mode': 'hover'
-
-匀速圆周：
-  'mode': 'circle'
-  'speed': 1.0      # 飞行速度 m/s
-  'radius': 10.0    # 圆半径 m
-
-直线飞行：
-  'mode': 'line'
-  'speed': 1.0      # 飞行速度 m/s
-
-五、复现检查清单
-Gazebo 正常启动且无报错
-start_9_px4.sh 执行后看到9个无人机模型出现在 Gazebo 中
-MicroXRCEAgent 显示 [INFO] [xrce] session ... 无错误
-终端4中每个 mpc_node 输出 acados OCP ready 和 mpc_controller drone x ready
-约1秒后各飞机输出 sent ARM + OFFBOARD commands
-Gazebo 中无人机起飞并形成对应编队
+□ Gazebo 正常启动无报错
+□ start_N_px4.sh 执行后 Gazebo 中出现对应数量无人机模型
+□ MicroXRCEAgent 显示 [CREATE  CLIENT] session 建立
+□ 各 mpc_node 输出 acados OCP ready
+□ 约2秒后输出 OFFBOARD + ARMED confirmed
+□ diag_monitor 显示所有机 ARM=ARMED  NAV=OFFBOARD
+□ diag_monitor 显示 Min spacing > 1.8m
+□ diag_monitor 显示 MPC fallback_count = 0
