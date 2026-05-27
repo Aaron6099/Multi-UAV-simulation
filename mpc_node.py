@@ -21,11 +21,23 @@ from px4_msgs.msg import (
 
 # ------------------------------------------------------------------ helpers
 def make_px4_qos():
+    """订阅 PX4 'out' 话题：PX4 DataWriter 用 TRANSIENT_LOCAL，ROS2 订阅者匹配。"""
     return QoSProfile(
         reliability=ReliabilityPolicy.BEST_EFFORT,
         history=HistoryPolicy.KEEP_LAST,
         depth=5,
         durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+
+
+def make_px4_pub_qos():
+    """发布到 PX4 'in' 话题：PX4 DataReader 用 VOLATILE，ROS2 发布者必须匹配。
+    用 TRANSIENT_LOCAL 会导致多机时消息丢失、OFFBOARD 丢失、ARM 失败。"""
+    return QoSProfile(
+        reliability=ReliabilityPolicy.BEST_EFFORT,
+        history=HistoryPolicy.KEEP_LAST,
+        depth=5,
+        durability=DurabilityPolicy.VOLATILE,
     )
 
 
@@ -333,7 +345,14 @@ class MpcControllerNode(Node):
         self.peer_predictions = {}
         self._dbg_counter = 0
 
-        self.last_valid_yaw = 0.0          # 上一次有效的偏航角，用于低速保持
+        self.last_valid_yaw = 0.0
+
+        # 健康诊断计数器
+        self._fallback_count = 0           # 累计 hover 降级次数
+        self._hover_active = False         # 当前帧是否在 hover 降级
+        self._last_mpc_status = 0
+        self._last_solve_ms = 0.0
+        self._last_pos_err = 0.0
 
         # EKF reset trackers (one per known drone)
         self._prev_xy_reset = [0] * self.num_drones
@@ -364,18 +383,19 @@ class MpcControllerNode(Node):
         self.get_logger().info('acados OCP ready.')
 
         # ROS 2 IO
-        qos = make_px4_qos()
+        qos     = make_px4_qos()      # 订阅 PX4 "out" 话题（TRANSIENT_LOCAL）
+        pub_qos = make_px4_pub_qos()  # 发布到 PX4 "in" 话题（VOLATILE，必须匹配 PX4 DataReader）
         self.pub_offboard_mode = self.create_publisher(
             OffboardControlMode,
-            topic_for_drone(self.drone_id, 'in/offboard_control_mode'), qos,
+            topic_for_drone(self.drone_id, 'in/offboard_control_mode'), pub_qos,
         )
         self.pub_setpoint = self.create_publisher(
             TrajectorySetpoint,
-            topic_for_drone(self.drone_id, 'in/trajectory_setpoint'), qos,
+            topic_for_drone(self.drone_id, 'in/trajectory_setpoint'), pub_qos,
         )
         self.pub_vehicle_cmd = self.create_publisher(
             VehicleCommand,
-            topic_for_drone(self.drone_id, 'in/vehicle_command'), qos,
+            topic_for_drone(self.drone_id, 'in/vehicle_command'), pub_qos,
         )
         self._arming_state = 0   # 0=unknown,1=disarmed,2=armed
         self._nav_state   = 0
@@ -413,6 +433,12 @@ class MpcControllerNode(Node):
         self.pub_predicted = self.create_publisher(
             Float64MultiArray,
             mpc_topic_for_drone(self.drone_id, 'predicted_trajectory'), 10,
+        )
+        # 健康诊断话题（供 diag_monitor.py 订阅）
+        # 格式: [drone_id, mpc_status, solve_ms, fallback_count, hover_active, pos_err_m]
+        self.pub_health = self.create_publisher(
+            Float32MultiArray,
+            mpc_topic_for_drone(self.drone_id, 'health'), 10,
         )
         for j in self.neighbours:
             self.create_subscription(
@@ -538,34 +564,40 @@ class MpcControllerNode(Node):
 
         if self._startup_counter < self.startup_zero_vel_frames:
             self._startup_counter += 1
+            self._hover_active = True
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
             return
 
         # After startup: retry ARM+OFFBOARD every 100 frames (~2 s) until confirmed
         if not self._arm_offboard_confirmed:
             self._cmd_retry_counter += 1
-            if self._cmd_retry_counter % 100 == 1:   # fire on frame 1, 101, 201, ...
+            if self._cmd_retry_counter % 50 == 1:    # 每 50 帧（1 s）重试，比原来 100 帧更积极
                 self._arm_and_engage_offboard()
                 if not self._arm_offboard_confirmed:
                     self.get_logger().info(
                         f'drone {self.drone_id}: retry ARM+OFFBOARD '
-                        f'(nav={self._nav_state}, arm={self._arming_state})')
+                        f'(nav={self._nav_state}, arm={self._arming_state}) '
+                        f'frame={self._cmd_retry_counter}')
+            self._hover_active = True
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
             return
 
         self_ds = self.drone_states[self.drone_id]
         if not self_ds.received:
+            self._hover_active = True
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
             return
 
         if not self.leader_received:
-            # 无领队信号：位置保持悬停（PX4位置控制器处理高度收敛）
+            self._hover_active = True
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
             return
 
         x_ref = self._build_reference_trajectory()
         nb_traj = self._collect_neighbour_predictions()
         x0 = np.concatenate([self_ds.pos, self_ds.vel])
+
+        self._hover_active = False   # 假设本帧正常，后续如有降级会覆盖为 True
 
         try:
             u0, x_pred, info = self.mpc.solve(
@@ -574,16 +606,23 @@ class MpcControllerNode(Node):
             )
         except Exception as e:
             self.get_logger().warn(f'MPC solve crashed: {e}; holding position')
+            self._fallback_count += 1
+            self._hover_active = True
+            self._publish_health()
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
             return
+
+        self._last_mpc_status = int(info['status'])
+        self._last_solve_ms   = float(info['solve_time_s']) * 1000.0
 
         self._dbg_counter += 1
         if self._dbg_counter % int(self.control_hz) == 0:
             self.get_logger().info(
-                f'solve: status={info["status"]} '
-                f'time={info["solve_time_s"]*1000:.2f}ms '
+                f'[d{self.drone_id}] solve: status={info["status"]} '
+                f'time={self._last_solve_ms:.2f}ms '
                 f'cost={info["cost"]:.1f} '
-                f'pos=({self_ds.pos[0]:.1f},{self_ds.pos[1]:.1f},{self_ds.pos[2]:.1f})'
+                f'pos=({self_ds.pos[0]:.2f},{self_ds.pos[1]:.2f},{self_ds.pos[2]:.2f}) '
+                f'fallbacks={self._fallback_count}'
             )
 
         yaw_sp = self.leader_yaw if math.isfinite(self.leader_yaw) else 0.0
@@ -591,25 +630,32 @@ class MpcControllerNode(Node):
         # 0=成功, 2=达到最大迭代但解仍可用; 1=发散, 3=最小步长, 4=QP失败 → 位置保持
         if info['status'] not in (0, 2):
             self.get_logger().warn(
-                f'acados status={info["status"]} — holding position'
+                f'[d{self.drone_id}] acados status={info["status"]} — holding position '
+                f'(total fallbacks={self._fallback_count + 1})'
             )
+            self._fallback_count += 1
+            self._hover_active = True
+            self._publish_health()
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_sp)
             return
 
-        # MPC 预测下一步：位置（世界系，用于位置闭环）+ 速度（世界系，用于前馈）
         pos_sp = x_pred[1, 0:3].copy()
         vel_ff = x_pred[1, 3:6].copy()
 
-        # 安全检查：期望位置与当前位置偏差 > 5m 或非有限值 → 位置保持
+        # 安全检查：期望位置偏差 > 5m 或非有限值 → 位置保持
         pos_err = float(np.linalg.norm(pos_sp[:2] - self_ds.pos[:2]))
+        self._last_pos_err = pos_err
         if pos_err > 5.0 or not np.all(np.isfinite(pos_sp)):
             self.get_logger().warn(
-                f'pos_sp偏差过大 ({pos_err:.1f}m) 或非有限值 — holding position'
+                f'[d{self.drone_id}] pos_sp偏差过大 ({pos_err:.1f}m) — holding position '
+                f'(total fallbacks={self._fallback_count + 1})'
             )
+            self._fallback_count += 1
+            self._hover_active = True
+            self._publish_health()
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_sp)
             return
 
-        # 限制速度前馈幅值（不影响位置闭环，仅防止前馈过大干扰内环）
         if np.all(np.isfinite(vel_ff)):
             vel_ff_xy_norm = float(np.linalg.norm(vel_ff[:2]))
             if vel_ff_xy_norm > self.max_speed:
@@ -617,8 +663,7 @@ class MpcControllerNode(Node):
         else:
             vel_ff = np.zeros(3)
 
-        # 发布位置设定点（位置闭环）+ 速度前馈
-        # PX4 官方：position≠NaN 时，velocity 作为前馈项加入内环，提升轨迹跟踪性能
+        self._publish_health()
         self.publish_position_setpoint(pos_sp, vel_ff, yaw_sp)
         self.publish_predicted_trajectory(x_pred[:, 0:3])
 
@@ -655,6 +700,20 @@ class MpcControllerNode(Node):
             else:
                 out[idx] = np.tile(self.drone_states[self.drone_id].pos + self.formation_offsets[j] - self.formation_offsets[self.drone_id], (N1, 1))
         return out
+
+    def _publish_health(self):
+        """发布 MPC 健康诊断数据，供 diag_monitor.py 实时监控。
+        格式: [drone_id, mpc_status, solve_ms, fallback_count, hover_active, pos_err_m]"""
+        msg = Float32MultiArray()
+        msg.data = [
+            float(self.drone_id),
+            float(self._last_mpc_status),
+            float(self._last_solve_ms),
+            float(self._fallback_count),
+            float(1 if self._hover_active else 0),
+            float(self._last_pos_err),
+        ]
+        self.pub_health.publish(msg)
 
     def publish_offboard_mode(self):
         msg = OffboardControlMode()
