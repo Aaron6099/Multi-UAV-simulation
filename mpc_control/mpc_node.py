@@ -732,6 +732,10 @@ class MpcControllerNode(Node):
             pred_fresh = (traj is not None and traj.shape[0] >= 1
                           and (now - stamp) <= self.neighbour_timeout)
             if pred_fresh:
+                # 时间对齐：平移掉通信延迟对应的步数
+                latency = now - stamp
+                shift = min(int(round(latency / self.mpc_dt)), traj.shape[0] - 1)
+                traj = traj[shift:]
                 if traj.shape[0] >= N1:
                     out[idx] = traj[:N1]
                 else:
