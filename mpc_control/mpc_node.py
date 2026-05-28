@@ -343,6 +343,7 @@ class MpcControllerNode(Node):
         self.last_control_time = self.get_clock().now()
         self._startup_counter = 0
         self.peer_predictions = {}
+        self.peer_prediction_stamps = {}   # drone_id -> float (seconds)
         self._dbg_counter = 0
 
         self.last_valid_yaw = 0.0
@@ -562,6 +563,7 @@ class MpcControllerNode(Node):
                 return
             traj = data.reshape(-1, 3)
             self.peer_predictions[drone_idx] = traj
+            self.peer_prediction_stamps[drone_idx] = self.get_clock().now().nanoseconds * 1e-9
         return cb
 
     # =================================================================
@@ -575,16 +577,19 @@ class MpcControllerNode(Node):
         if dt <= 0.0 or dt > 0.5:
             dt = 1.0 / self.control_hz
 
+        # 使用当前姿态 yaw，避免起飞时强制转向正北
+        yaw_hold = self.attitude_yaw if self.attitude_received else 0.0
+
         if self._startup_counter < self.startup_zero_vel_frames:
             self._startup_counter += 1
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
-        # After startup: retry ARM+OFFBOARD every 100 frames (~2 s) until confirmed
+        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed
         if not self._arm_offboard_confirmed:
             self._cmd_retry_counter += 1
-            if self._cmd_retry_counter % 50 == 1:    # 每 50 帧（1 s）重试，比原来 100 帧更积极
+            if self._cmd_retry_counter % 50 == 1:
                 self._arm_and_engage_offboard()
                 if not self._arm_offboard_confirmed:
                     self.get_logger().info(
@@ -592,18 +597,18 @@ class MpcControllerNode(Node):
                         f'(nav={self._nav_state}, arm={self._arming_state}) '
                         f'frame={self._cmd_retry_counter}')
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         self_ds = self.drone_states[self.drone_id]
         if not self_ds.received:
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         if not self.leader_received:
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         x_ref = self._build_reference_trajectory()
@@ -702,12 +707,16 @@ class MpcControllerNode(Node):
     def _build_reference_trajectory(self):
         N = self.N
         x_ref = np.zeros((N + 1, 6))
+        leader_pos_safe = (self.leader_pos.copy()
+                           if np.all(np.isfinite(self.leader_pos)) else np.zeros(3))
+        leader_vel_safe = (self.leader_vel.copy()
+                           if np.all(np.isfinite(self.leader_vel)) else np.zeros(3))
         for k in range(N + 1):
             t = k * self.mpc_dt
-            pos = self.leader_pos + self.leader_vel * t + self.my_offset
+            pos = leader_pos_safe + leader_vel_safe * t + self.my_offset
             pos[2] = self.target_alt
             x_ref[k, 0:3] = pos
-            x_ref[k, 3:5] = self.leader_vel[:2]
+            x_ref[k, 3:5] = leader_vel_safe[:2]
             x_ref[k, 5]   = 0.0
         return x_ref
 
@@ -719,7 +728,10 @@ class MpcControllerNode(Node):
         out = np.zeros((len(self.neighbours), N1, 3))
         for idx, j in enumerate(self.neighbours):
             traj = self.peer_predictions.get(j)
-            if traj is not None and traj.shape[0] >= 1:
+            stamp = self.peer_prediction_stamps.get(j, 0.0)
+            pred_fresh = (traj is not None and traj.shape[0] >= 1
+                          and (now - stamp) <= self.neighbour_timeout)
+            if pred_fresh:
                 if traj.shape[0] >= N1:
                     out[idx] = traj[:N1]
                 else:
@@ -749,8 +761,8 @@ class MpcControllerNode(Node):
 
     def publish_offboard_mode(self):
         msg = OffboardControlMode()
-        msg.position = True   # 位置闭环：PX4内环处理漂移，velocity作为前馈
-        msg.velocity = False
+        msg.position = False
+        msg.velocity = True   # 速度控制模式：与 publish_velocity_setpoint 匹配
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
