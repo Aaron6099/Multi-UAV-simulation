@@ -57,6 +57,7 @@ class LeaderNode(Node):
         self.declare_parameter('speed',       1.0)      # m/s
         self.declare_parameter('radius',     10.0)      # circle 半径 m
         self.declare_parameter('publish_hz', 50.0)
+        self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
 
         self._mode   = str(self.get_parameter('mode').value)
         self._x0     = float(self.get_parameter('start_x').value)
@@ -68,6 +69,7 @@ class LeaderNode(Node):
 
         self._t  = 0.0
         self._dt = 1.0 / hz
+        self._max_distance = float(self.get_parameter('max_distance').value)
         self._initial_yaw = None   # 首次发布时记录
         self._current_yaw = 0.0    # 当前平滑后的 yaw（用于限幅）
 
@@ -140,6 +142,11 @@ class LeaderNode(Node):
             else:
                 x = self._x0 + self._speed * (t - self._line_align_duration)
                 y = self._y0
+                # 到达最大距离后悬停
+                dist = abs(x - self._x0)
+                if dist >= self._max_distance:
+                    x = self._x0 + self._max_distance * (1.0 if self._speed > 0 else -1.0)
+                    vx, vy = 0.0, 0.0
                 raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
                 yaw = self._apply_yaw_limits(raw_yaw)
 
