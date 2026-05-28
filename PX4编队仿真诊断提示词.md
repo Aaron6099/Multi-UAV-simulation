@@ -22,13 +22,11 @@
 |------|------|
 | 仿真环境 | PX4 v1.14 + ROS2 + acados MPC + Gazebo |
 | 开发流程 | Windows 桌面编辑 → GitHub → Ubuntu 主机仿真 |
-| 控制模式 | `OffboardControlMode.position=True`（位置闭环 + 速度前馈） |
+| 控制模式 | `OffboardControlMode.velocity=True`（MPC 速度输出 + 位置误差 P 校正） |
 | 坐标系 | PX4 NED（x=北, y=东, z=下）；Gazebo ENU（x=东, y=北, z=上） |
 | 最终目标 | 仿真稳定后上真机（Pixhawk + 树莓派 4B），室内外均需飞行 |
 
-> **MPC 设定点说明**：MPC 当前输出 `x_pred[pred_k, 0:3]` 作为 PX4 位置设定点。  
-> `pred_k=1` 时预测位置 ≈ 当前位置，PX4 几乎不产生速度指令，导致飞行迟钝。  
-> 建议优先验证 `pred_k=3`（0.15s 前瞻），中期改为输出速度设定点（`TrajectorySetpoint.velocity`）。
+> **MPC 控制输出说明**：当前采用速度控制模式。MPC 输出预测速度 `x_pred[1, 3:6]`，叠加位置误差 P 校正（Kp=1.0）后作为速度设定点发送给 PX4。高度使用纯 P 控制器保持。
 
 ### 文件路径（Ubuntu）
 
