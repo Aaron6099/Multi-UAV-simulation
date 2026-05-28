@@ -273,6 +273,7 @@ class MpcControllerNode(Node):
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
+        self.declare_parameter('pred_k', 3)
         self.declare_parameter('q_pos', 4.0)
         self.declare_parameter('q_vel', 1.0)
         self.declare_parameter('r_acc', 0.1)
@@ -323,6 +324,7 @@ class MpcControllerNode(Node):
 
         N        = int(self.get_parameter('mpc_horizon').value)
         mpc_dt   = float(self.get_parameter('mpc_dt').value)
+        self.pred_k = max(1, min(int(self.get_parameter('pred_k').value), N))
         q_pos    = float(self.get_parameter('q_pos').value)
         q_vel    = float(self.get_parameter('q_vel').value)
         r_acc    = float(self.get_parameter('r_acc').value)
@@ -343,6 +345,7 @@ class MpcControllerNode(Node):
         self.last_control_time = self.get_clock().now()
         self._startup_counter = 0
         self.peer_predictions = {}
+        self.peer_prediction_stamps = {}   # drone_id -> float (seconds)
         self._dbg_counter = 0
 
         self.last_valid_yaw = 0.0
@@ -428,7 +431,7 @@ class MpcControllerNode(Node):
             depth=10,
         )
         self.create_subscription(
-            Float32MultiArray, '/leader/state', self.on_leader_state, leader_qos,
+            Float64MultiArray, '/leader/state', self.on_leader_state, leader_qos,
         )
         self.pub_predicted = self.create_publisher(
             Float64MultiArray,
@@ -549,6 +552,7 @@ class MpcControllerNode(Node):
                 return
             traj = data.reshape(-1, 3)
             self.peer_predictions[drone_idx] = traj
+            self.peer_prediction_stamps[drone_idx] = self.get_clock().now().nanoseconds * 1e-9
         return cb
 
     # =================================================================
@@ -562,16 +566,19 @@ class MpcControllerNode(Node):
         if dt <= 0.0 or dt > 0.5:
             dt = 1.0 / self.control_hz
 
+        # 使用当前姿态 yaw 作为保持值，避免起飞时强制转向正北
+        yaw_hold = self.attitude_yaw if self.attitude_received else 0.0
+
         if self._startup_counter < self.startup_zero_vel_frames:
             self._startup_counter += 1
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
-        # After startup: retry ARM+OFFBOARD every 100 frames (~2 s) until confirmed
+        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed
         if not self._arm_offboard_confirmed:
             self._cmd_retry_counter += 1
-            if self._cmd_retry_counter % 50 == 1:    # 每 50 帧（1 s）重试，比原来 100 帧更积极
+            if self._cmd_retry_counter % 50 == 1:
                 self._arm_and_engage_offboard()
                 if not self._arm_offboard_confirmed:
                     self.get_logger().info(
@@ -579,18 +586,18 @@ class MpcControllerNode(Node):
                         f'(nav={self._nav_state}, arm={self._arming_state}) '
                         f'frame={self._cmd_retry_counter}')
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         self_ds = self.drone_states[self.drone_id]
         if not self_ds.received:
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         if not self.leader_received:
             self._hover_active = True
-            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), 0.0)
+            self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
         x_ref = self._build_reference_trajectory()
@@ -639,8 +646,8 @@ class MpcControllerNode(Node):
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_sp)
             return
 
-        pos_sp = x_pred[1, 0:3].copy()
-        vel_ff = x_pred[1, 3:6].copy()
+        pos_sp = x_pred[self.pred_k, 0:3].copy()
+        vel_ff = x_pred[self.pred_k, 3:6].copy()
 
         # 安全检查：期望位置偏差 > 5m 或非有限值 → 位置保持
         pos_err = float(np.linalg.norm(pos_sp[:2] - self_ds.pos[:2]))
@@ -670,12 +677,16 @@ class MpcControllerNode(Node):
     def _build_reference_trajectory(self):
         N = self.N
         x_ref = np.zeros((N + 1, 6))
+        leader_pos_safe = (self.leader_pos.copy()
+                           if np.all(np.isfinite(self.leader_pos)) else np.zeros(3))
+        leader_vel_safe = (self.leader_vel.copy()
+                           if np.all(np.isfinite(self.leader_vel)) else np.zeros(3))
         for k in range(N + 1):
             t = k * self.mpc_dt
-            pos = self.leader_pos + self.leader_vel * t + self.my_offset
+            pos = leader_pos_safe + leader_vel_safe * t + self.my_offset
             pos[2] = self.target_alt
             x_ref[k, 0:3] = pos
-            x_ref[k, 3:5] = self.leader_vel[:2]
+            x_ref[k, 3:5] = leader_vel_safe[:2]
             x_ref[k, 5]   = 0.0
         return x_ref
 
@@ -687,7 +698,10 @@ class MpcControllerNode(Node):
         out = np.zeros((len(self.neighbours), N1, 3))
         for idx, j in enumerate(self.neighbours):
             traj = self.peer_predictions.get(j)
-            if traj is not None and traj.shape[0] >= 1:
+            stamp = self.peer_prediction_stamps.get(j, 0.0)
+            pred_fresh = (traj is not None and traj.shape[0] >= 1
+                          and (now - stamp) <= self.neighbour_timeout)
+            if pred_fresh:
                 if traj.shape[0] >= N1:
                     out[idx] = traj[:N1]
                 else:

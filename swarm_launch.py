@@ -152,6 +152,7 @@ COMMON = {
     'startup_zero_vel_frames':  100,   # 从50增至100：2s，给EKF更多收敛时间（多机尤其重要）
     'mpc_horizon':              20,
     'mpc_dt':                 0.05,
+    'pred_k':                    3,   # MPC 前瞻步数：1=0.05s(迟钝), 3=0.15s(推荐), 5=0.25s(激进)
     'q_pos':                   4.0,
     'q_vel':                   2.0,
     'r_acc':                   0.1,
