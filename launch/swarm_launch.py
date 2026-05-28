@@ -186,6 +186,7 @@ def _make_nodes(context, *args, **kwargs):
             'altitude':     COMMON['target_alt'],
             'speed':        LaunchConfiguration('leader_speed'),
             'radius':       LaunchConfiguration('leader_radius'),
+            'max_distance': LaunchConfiguration('max_distance'),
             'publish_hz':  50.0,
         }],
     ))
@@ -236,6 +237,11 @@ def generate_launch_description():
             'yaw_mode',
             default_value='fixed',
             description='偏航模式: fixed(固定朝向) | center(朝向圆心) | tangent(跟随方向)',
+        ),
+        DeclareLaunchArgument(
+            'max_distance',
+            default_value='20.0',
+            description='直线模式最大飞行距离 (m)，到达后悬停',
         ),
         OpaqueFunction(function=_make_nodes),
     ])
