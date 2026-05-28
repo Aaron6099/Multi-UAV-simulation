@@ -25,6 +25,8 @@ if [ ! -d "$PX4_DIR" ]; then
     exit 1
 fi
 
+export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
+
 cd "$PX4_DIR"
 
 # Gazebo ENU 出生位置  "x_east, y_north, z_up, roll, pitch, yaw"
@@ -39,6 +41,7 @@ for i in 0 1; do
 
     if command -v gnome-terminal &> /dev/null; then
         gnome-terminal --tab --title="px4_${i}_pair2" -- bash -c "
+            export GZ_SIM_RESOURCE_PATH='$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds'
             export PX4_GZ_STANDALONE=1
             export PX4_SYS_AUTOSTART=4001
             export PX4_GZ_MODEL=x500
@@ -51,6 +54,7 @@ for i in 0 1; do
         LOG_DIR="$HOME/px4_logs"
         mkdir -p "$LOG_DIR"
         (
+            export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
             export PX4_GZ_STANDALONE=1
             export PX4_SYS_AUTOSTART=4001
             export PX4_GZ_MODEL=x500

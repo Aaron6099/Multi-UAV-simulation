@@ -32,12 +32,15 @@
 set -e
 
 PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot-1.14}"
+START_DELAY="${START_DELAY:-3}"
 
 if [ ! -d "$PX4_DIR" ]; then
     echo "ERROR: PX4_DIR=$PX4_DIR does not exist."
     echo "Set PX4_DIR env var, e.g.:  PX4_DIR=~/PX4-Autopilot bash start_9_px4.sh"
     exit 1
 fi
+
+export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
 
 cd "$PX4_DIR"
 
@@ -54,14 +57,13 @@ declare -a POSES=(
     "-3,-3,0,0,0,0"   # 8: 西南
 )
 
-START_DELAY="${START_DELAY:-3}"
-
 for i in $(seq 0 8); do
     POSE="${POSES[$i]}"
     echo "Starting drone $i with PX4_GZ_MODEL_POSE=$POSE ..."
 
     if command -v gnome-terminal &> /dev/null; then
         gnome-terminal --tab --title="px4_$i" -- bash -c "
+            export GZ_SIM_RESOURCE_PATH='$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds'
             export PX4_GZ_STANDALONE=1
             export PX4_SYS_AUTOSTART=4001
             export PX4_GZ_MODEL=x500
@@ -75,6 +77,7 @@ for i in $(seq 0 8); do
         LOG_DIR="$HOME/px4_logs"
         mkdir -p "$LOG_DIR"
         (
+            export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
             export PX4_GZ_STANDALONE=1
             export PX4_SYS_AUTOSTART=4001
             export PX4_GZ_MODEL=x500
