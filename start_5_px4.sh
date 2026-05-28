@@ -1,19 +1,22 @@
 #!/bin/bash
-# start_3_px4.sh — trio3 三机诊断（等边三角形，外接圆半径 3 m，边长 ≈ 5.196 m）
+# start_5_px4.sh — cross5 / star5 五机编队
 #
 # 用法:
 #   终端1: gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
-#   终端2: START_DELAY=5 bash start_3_px4.sh
+#   终端2: START_DELAY=5 bash start_5_px4.sh
 #   终端3: MicroXRCEAgent udp4 -p 8888
-#   终端4: ros2 launch mpc_control swarm_launch.py formation:=trio3
+#   终端4: ros2 launch mpc_control swarm_launch.py formation:=cross5
+#       或: ros2 launch mpc_control swarm_launch.py formation:=star5
 #
 # 出生位置 (Gazebo ENU: x=East, y=North):
-#   drone 0: (ENU  0,   3)    → NED (+3,      0   ) 北顶
-#   drone 1: (ENU  2.598,-1.5)→ NED (-1.5,   +2.598) 东南
-#   drone 2: (ENU -2.598,-1.5)→ NED (-1.5,   -2.598) 西南
+#   drone 0: (ENU  0,  0) → NED ( 0,  0) 中心
+#   drone 1: (ENU  3,  0) → NED ( 0, +3) 东
+#   drone 2: (ENU -3,  0) → NED ( 0, -3) 西
+#   drone 3: (ENU  0,  3) → NED (+3,  0) 北
+#   drone 4: (ENU  0, -3) → NED (-3,  0) 南
 #
-# NED↔ENU: ENU_x = NED_y(East), ENU_y = NED_x(North)
-# 最小间距 = 3√3 ≈ 5.196 m >> d_safe=1.5 m，安全余量充足
+# 注: cross5 和 star5 共用同一套出生位置（都是十字型）
+#     star5 的队形偏移在 swarm_launch.py 中用 OFFSETS_STAR5 重定义
 #
 # Env: PX4_DIR, START_DELAY (默认 5 s)
 
@@ -33,17 +36,19 @@ cd "$PX4_DIR"
 
 # Gazebo ENU 出生位置  "x_east, y_north, z_up, roll, pitch, yaw"
 declare -a POSES=(
-    "0,3,0,0,0,0"          # 0: 北顶        NED(+3,     0    )
-    "2.598,-1.5,0,0,0,0"   # 1: 东南        NED(-1.5,  +2.598)
-    "-2.598,-1.5,0,0,0,0"  # 2: 西南        NED(-1.5,  -2.598)
+    "0,0,0,0,0,0"    # 0: 中心  NED( 0,  0)
+    "3,0,0,0,0,0"    # 1: 东    NED( 0, +3)
+    "-3,0,0,0,0,0"   # 2: 西    NED( 0, -3)
+    "0,3,0,0,0,0"    # 3: 北    NED(+3,  0)
+    "0,-3,0,0,0,0"   # 4: 南    NED(-3,  0)
 )
 
-for i in 0 1 2; do
+for i in 0 1 2 3 4; do
     POSE="${POSES[$i]}"
     echo "启动 drone $i | ENU pose: $POSE"
 
     if command -v gnome-terminal &> /dev/null; then
-        gnome-terminal --tab --title="px4_${i}_trio3" -- bash -c "
+        gnome-terminal --tab --title="px4_${i}_5uav" -- bash -c "
             export GZ_SIM_RESOURCE_PATH='$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds'
             export PX4_GZ_STANDALONE=1
             export PX4_SYS_AUTOSTART=4001
@@ -68,21 +73,23 @@ for i in 0 1 2; do
         echo "  後台，日志: $LOG_DIR/px4_$i.log (PID $!)"
     fi
 
-    if [ $i -lt 2 ]; then
+    if [ $i -lt 4 ]; then
         echo "  等待 ${START_DELAY}s ..."
         sleep "$START_DELAY"
     fi
 done
 
 echo ""
-echo "=== trio3: 3 架 PX4 实例已启动 ==="
-echo "编队布局 (NED，等边三角形 R=3m):"
-echo "  drone 0: (+3.000,  0.000) 北顶"
-echo "  drone 1: (-1.500, +2.598) 东南"
-echo "  drone 2: (-1.500, -2.598) 西南"
-echo "  最小边长 ≈ 5.196 m"
+echo "=== cross5/star5: 5 架 PX4 实例已启动 ==="
+echo "编队布局 (NED):"
+echo "  drone 0: (  0,  0) 中心"
+echo "  drone 1: (  0, +3) 东"
+echo "  drone 2: (  0, -3) 西"
+echo "  drone 3: ( +3,  0) 北"
+echo "  drone 4: ( -3,  0) 南"
 echo ""
 echo "下一步:"
 echo "  终端3: MicroXRCEAgent udp4 -p 8888"
 echo "  终端4: cd ~/ros2_control_mpc_ws && source install/setup.bash"
-echo "          ros2 launch mpc_control swarm_launch.py formation:=trio3"
+echo "          ros2 launch mpc_control swarm_launch.py formation:=cross5"
+echo "       或: ros2 launch mpc_control swarm_launch.py formation:=star5"

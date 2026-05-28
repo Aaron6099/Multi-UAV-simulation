@@ -22,6 +22,8 @@ if [ ! -d "$PX4_DIR" ]; then
     exit 1
 fi
 
+export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
+
 cd "$PX4_DIR"
 
 POSE="0,0,0,0,0,0"
@@ -29,6 +31,7 @@ echo "启动 drone 0 | ENU pose: $POSE"
 
 if command -v gnome-terminal &> /dev/null; then
     gnome-terminal --tab --title="px4_0_solo" -- bash -c "
+        export GZ_SIM_RESOURCE_PATH='$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds'
         export PX4_GZ_STANDALONE=1
         export PX4_SYS_AUTOSTART=4001
         export PX4_GZ_MODEL=x500
@@ -41,6 +44,7 @@ else
     LOG_DIR="$HOME/px4_logs"
     mkdir -p "$LOG_DIR"
     (
+        export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
         export PX4_GZ_STANDALONE=1
         export PX4_SYS_AUTOSTART=4001
         export PX4_GZ_MODEL=x500
