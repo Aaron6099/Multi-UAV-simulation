@@ -7,6 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 代码在 **Windows 桌面编辑**，通过 GitHub 同步到 **Ubuntu 主机**进行仿真。
 
+## 代码结构（唯一源头，勿再产生副本）
+
+标准 ROS2 ament_python 包，仓库根目录即 Ubuntu 上的 `src/mpc_control/`：
+
+- `mpc_control/`（Python 模块）：`mpc_node.py` / `leader_node.py` / `virtual_leader_node.py` / `arming_node.py` —— **`ros2 launch` 实际运行的就是这里**
+- `launch/swarm_launch.py`：启动与队形/参数配置（唯一 launch 文件，含 `COMMON` 字典）
+- `config/swarm_config.yaml`：参数文件
+- 根目录：`start_{1,2,3,5,9}_px4.sh`（bash 直接跑）、`diag_monitor.py`（python3 直接跑）、`setup.py`/`package.xml`
+
+> 编辑代码只改 `mpc_control/` 模块和 `launch/`；**绝不在根目录另存 `mpc_node.py`/`leader_node.py`/`swarm_launch.py` 副本**。2026-05-29 已清理一批重构前的过时副本——根目录那些不会被 ROS2 编译，曾导致"改了没生效"。提交一律用 `/commit-push`（`git add -A`）。
+
 ## 坐标系（极易出错）
 
 | 系统 | 坐标轴 | 说明 |
@@ -19,10 +30,12 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 
 ## 控制架构
 
-- **控制模式**：`OffboardControlMode.position=True`（位置闭环）
-- **Setpoint**：`TrajectorySetpoint.position`（非 NaN）+ `.velocity`（前馈）
-- **PX4 行为**：position 非 NaN 时，velocity 作为内环前馈项（官方文档确认）
-- **MPC 输出**：`x_pred[1, 0:3]` → position setpoint；`x_pred[1, 3:6]` → velocity feedforward
+> ⚠️ 当前为**速度控制模式**（自 commit 32759f6 / 3f7bbe8）。早期文档写的 position 闭环已废弃，**勿回退**（诊断文档已修复 bug#6）。
+
+- **控制模式**：`OffboardControlMode.velocity=True`（速度闭环）
+- **Setpoint**：`TrajectorySetpoint.velocity` = MPC 预测速度 + 位置误差 P 校正（Kp=1.0）；`.position=NaN`
+- **MPC 输出**：取 `x_pred[1, 3:6]`（预测速度）作为速度设定点基准
+- **高度**：纯 P 控制器保持 `target_alt`
 - **降级策略**：任何异常（解失败 / 偏差 >5m / NaN）→ `_hover_setpoint_world()` 悬停
 
 ## 关键参数位置
@@ -30,7 +43,7 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 所有运行参数集中在 `swarm_launch.py` 的 `COMMON` 字典，修改此处即可，无需改 `mpc_node.py`。
 
 重要参数：
-- `max_speed`: 3.0 m/s（位置控制模式下的速度前馈限幅）
+- `max_speed`: 3.0 m/s（速度控制模式下的速度设定点限幅）
 - `neighbour_timeout`: 2.0 s（邻居通信超时容忍）
 - `target_alt`: -5.0（NED，负值=向上，离地 5 米）
 - `d_safe`: 1.5 m（碰撞软约束距离）
@@ -39,7 +52,7 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 
 - drone 0：`/fmu/in/...`、`/fmu/out/...`
 - drone 1-8：`/px4_{id}/fmu/in/...`、`/px4_{id}/fmu/out/...`
-- 领队：`/leader/state`（Float32MultiArray，格式 `[t, x, y, z, vx, vy, vz, yaw]`）
+- 领队：`/leader/state`（**Float64MultiArray**，格式 `[t, x, y, z, vx, vy, vz, yaw]`；曾用 Float32 精度不足致漂移，已修复 bug#4，勿回退）
 - MPC 预测轨迹：`/mpc/predicted_trajectory`（drone 0）或 `/px4_{id}/mpc/predicted_trajectory`
 
 ## 队形配置
@@ -55,26 +68,28 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 ## Ubuntu 端构建与启动顺序
 
 ```bash
-# 1. 清理残留
-pkill -f px4; pkill -f gz; pkill -f MicroXRCEAgent; pkill -f ros2
+# 1. 清理残留（用 -9 强制杀死，避免 MPC 节点残留造成命令冲突）
+pkill -9 -f px4; pkill -9 -f gz; pkill -9 -f MicroXRCEAgent; pkill -9 -f ros2
 
-# 2. 终端1：Gazebo
+# 2. 终端1：Gazebo（先设 GZ_SIM_RESOURCE_PATH，见诊断文档步骤0）
 gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
 
-# 3. 终端2：PX4（等 Gazebo 启动后）
-START_DELAY=10 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+# 3. 终端2：PX4（等 Gazebo 就绪后；按队形选脚本：5机用 start_5，9机用 start_9）
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_5_px4.sh
 
 # 4. 终端3：DDS 桥
 MicroXRCEAgent udp4 -p 8888
 
 # 5. 终端4：编译并启动（从 GitHub 拉取新代码后执行）
 cd ~/ros2_control_mpc_ws
-git pull  # 拉取最新代码
-cp ~/Desktop/或对应路径/mpc_node.py src/mpc_control/  # 若未直接 clone
+git pull origin main           # 仓库 clone 为 src/mpc_control，直接更新模块（无需 cp 拷贝）
+rm -rf /tmp/acados_di_mpc_*     # 改了 MPC 结构时必须清缓存
 colcon build --packages-select mpc_control
 source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=cross5
 ```
+
+> 完整分阶段启动命令（solo1→grid9）见 `/ubuntu-deploy` skill 或诊断文档「启动顺序」。
 
 ## acados 编译缓存
 
