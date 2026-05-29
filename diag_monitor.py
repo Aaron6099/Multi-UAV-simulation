@@ -190,7 +190,7 @@ class DiagMonitor(Node):
             )
 
         self.create_subscription(
-            Float32MultiArray, '/leader/state', self._on_leader, 10)
+            Float64MultiArray, '/leader/state', self._on_leader, 10)
 
         self.create_timer(1.0, self._print_status)
         self.get_logger().info(
