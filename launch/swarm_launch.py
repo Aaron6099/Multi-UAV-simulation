@@ -188,6 +188,7 @@ def _make_nodes(context, *args, **kwargs):
             'speed':        LaunchConfiguration('leader_speed'),
             'radius':       LaunchConfiguration('leader_radius'),
             'max_distance': LaunchConfiguration('max_distance'),
+            'start_delay':  LaunchConfiguration('leader_start_delay'),
             'publish_hz':  50.0,
         }],
     ))
@@ -226,8 +227,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'leader_speed',
-            default_value='1.0',
-            description='circle/line 模式下的飞行速度 (m/s)',
+            default_value='0.5',
+            description='circle/line 模式下的飞行速度 (m/s)；降到0.5更平稳，circle测试可显式传1.5',
         ),
         DeclareLaunchArgument(
             'leader_radius',
@@ -243,6 +244,11 @@ def generate_launch_description():
             'max_distance',
             default_value='20.0',
             description='直线模式最大飞行距离 (m)，到达后悬停',
+        ),
+        DeclareLaunchArgument(
+            'leader_start_delay',
+            default_value='10.0',
+            description='leader 起飞等待秒数：先原地不动，等僚机 ARM+爬升+组队再开始运动',
         ),
         OpaqueFunction(function=_make_nodes),
     ])
