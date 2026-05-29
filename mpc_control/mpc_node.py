@@ -270,6 +270,8 @@ class MpcControllerNode(Node):
         self.declare_parameter('control_hz', 50.0)
         self.declare_parameter('neighbour_timeout', 1.0)
         self.declare_parameter('startup_zero_vel_frames', 30)
+        # 校准 world_birth 前,要求 EKF 连续 valid 的帧数(等 GPS fix 收敛)
+        self.declare_parameter('calib_settle_frames', 25)
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -320,6 +322,7 @@ class MpcControllerNode(Node):
         self.control_hz = float(self.get_parameter('control_hz').value)
         self.neighbour_timeout = float(self.get_parameter('neighbour_timeout').value)
         self.startup_zero_vel_frames = int(self.get_parameter('startup_zero_vel_frames').value)
+        self.calib_settle_frames = max(1, int(self.get_parameter('calib_settle_frames').value))
 
         N        = int(self.get_parameter('mpc_horizon').value)
         mpc_dt   = float(self.get_parameter('mpc_dt').value)
@@ -359,6 +362,8 @@ class MpcControllerNode(Node):
         self._prev_xy_reset = [0] * self.num_drones
         self._prev_z_reset  = [0] * self.num_drones
         self._pos_calibrated = [False] * self.num_drones
+        # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
+        self._valid_streak = [0] * self.num_drones
 
         # MPC
         self.N = N
@@ -488,8 +493,23 @@ class MpcControllerNode(Node):
                     )
                     self._prev_z_reset[drone_idx] = msg.z_reset_counter
 
-            if not ds.received:
-                # Calibrate world_birth: set so that first world_pos = birth_pos.
+            # --- one-time world_birth calibration, GATED on EKF convergence ---
+            # 上电瞬间 PX4 就会发 vehicle_local_position,但此时 EKF 还没 GPS fix,
+            # x/y 是几十米级瞬态值。若直接拿首帧校准,会把垃圾烤进 world_birth,
+            # 造成机间坐标系不一致(悬停被各机"守出生点"掩盖,line 模式才暴露)。
+            # 因此必须等 xy_valid/z_valid 且连续稳定 calib_settle_frames 帧再锁定。
+            if not self._pos_calibrated[drone_idx]:
+                pos_ok = (msg.xy_valid and msg.z_valid
+                          and math.isfinite(msg.x)
+                          and math.isfinite(msg.y)
+                          and math.isfinite(msg.z))
+                if not pos_ok:
+                    self._valid_streak[drone_idx] = 0
+                    return
+                self._valid_streak[drone_idx] += 1
+                if self._valid_streak[drone_idx] < self.calib_settle_frames:
+                    return
+                # 用收敛后的稳定 local 当基准:校准时刻 world_pos == birth_pos
                 first_local = np.array([msg.x, msg.y, msg.z])
                 self.world_birth[drone_idx] = (
                     self.birth_positions[drone_idx] - first_local
@@ -498,12 +518,15 @@ class MpcControllerNode(Node):
                 self._prev_z_reset[drone_idx] = msg.z_reset_counter
                 self._pos_calibrated[drone_idx] = True
                 self.get_logger().info(
-                    f'first position from drone {drone_idx}: '
+                    f'first position from drone {drone_idx} '
+                    f'(calibrated after {self._valid_streak[drone_idx]} valid frames, '
+                    f'xy_valid={msg.xy_valid}, z_valid={msg.z_valid}): '
                     f'local=({msg.x:.2f}, {msg.y:.2f}, {msg.z:.2f}) '
                     f'world_birth=({self.world_birth[drone_idx,0]:.2f}, '
                     f'{self.world_birth[drone_idx,1]:.2f}, '
                     f'{self.world_birth[drone_idx,2]:.2f})'
                 )
+
             ds.received = True
             ds.last_stamp = now
             # Use DYNAMIC world_birth (compensates for EKF resets)
@@ -643,11 +666,16 @@ class MpcControllerNode(Node):
                 f'leader=({self.leader_pos[0]:.2f},{self.leader_pos[1]:.2f},{self.leader_pos[2]:.2f})'
             )
         if self._dbg_counter % int(self.control_hz) == 0:
+            wb = self.world_birth[self.drone_id]
+            local_now = self_ds.pos - wb     # = PX4 原始 local（校准的逆运算）
             self.get_logger().info(
                 f'[d{self.drone_id}] solve: status={info["status"]} '
-                f'time={self._last_solve_ms:.2f}ms '
-                f'cost={info["cost"]:.1f} '
+                f'time={self._last_solve_ms:.2f}ms cost={info["cost"]:.1f} '
                 f'pos=({self_ds.pos[0]:.2f},{self_ds.pos[1]:.2f},{self_ds.pos[2]:.2f}) '
+                f'local=({local_now[0]:.2f},{local_now[1]:.2f},{local_now[2]:.2f}) '
+                f'wbirth=({wb[0]:.2f},{wb[1]:.2f},{wb[2]:.2f}) '
+                f'ref=({x_ref[0,0]:.2f},{x_ref[0,1]:.2f}) '
+                f'leader=({self.leader_pos[0]:.2f},{self.leader_pos[1]:.2f}) '
                 f'fallbacks={self._fallback_count}'
             )
 
