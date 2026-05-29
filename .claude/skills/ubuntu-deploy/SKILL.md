@@ -13,9 +13,9 @@ disable-model-invocation: false
 
 ---
 
-**步骤 0：清理残留进程（每次启动前必须执行）**
+**步骤 0：清理残留进程（每次启动前必须执行，用 -9 强制杀死避免 MPC 节点残留）**
 ```bash
-pkill -f px4; pkill -f gz; pkill -f MicroXRCEAgent; pkill -f ros2
+pkill -9 -f px4; pkill -9 -f gz; pkill -9 -f MicroXRCEAgent; pkill -9 -f ros2
 ```
 
 **步骤 1：拉取最新代码**
@@ -26,10 +26,7 @@ git pull origin main
 
 **步骤 2：赋予启动脚本执行权限（首次拉取后执行一次即可）**
 ```bash
-chmod +x src/mpc_control/start_1_px4.sh
-chmod +x src/mpc_control/start_2_px4.sh
-chmod +x src/mpc_control/start_3_px4.sh
-chmod +x src/mpc_control/start_9_px4.sh
+chmod +x src/mpc_control/start_*_px4.sh   # 覆盖 1/2/3/5/9 全部脚本
 ```
 
 **步骤 3：清理 acados 缓存（修改了 mpc_node.py 后必须执行）**
@@ -93,19 +90,34 @@ ros2 launch mpc_control swarm_launch.py formation:=trio3 [leader_mode:=hover]
 python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation trio3
 ```
 
-**cross5 / star5 / grid9（正式编队）**
+**cross5 / star5（5机，Phase 3）**
 ```bash
 # 终端1
 gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
-# 终端2
-START_DELAY=10 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+# 终端2（5机务必用 start_5_px4.sh；误用 start_9 会让 drone5-8 停在地面）
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_5_px4.sh
 # 终端3
 MicroXRCEAgent udp4 -p 8888
 # 终端4
 cd ~/ros2_control_mpc_ws && source install/setup.bash
-ros2 launch mpc_control swarm_launch.py formation:=<队形> [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
+ros2 launch mpc_control swarm_launch.py formation:=<cross5|star5> [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
 # 终端5
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <队形>
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <cross5|star5>
+```
+
+**grid9（9机，Phase 3）**
+```bash
+# 终端1
+gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+# 终端2
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_9_px4.sh
+# 终端3
+MicroXRCEAgent udp4 -p 8888
+# 终端4
+cd ~/ros2_control_mpc_ws && source install/setup.bash
+ros2 launch mpc_control swarm_launch.py formation:=grid9 [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
+# 终端5
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation grid9
 ```
 
 ---
