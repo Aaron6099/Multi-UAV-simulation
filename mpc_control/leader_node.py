@@ -58,6 +58,7 @@ class LeaderNode(Node):
         self.declare_parameter('radius',     10.0)      # circle 半径 m
         self.declare_parameter('publish_hz', 50.0)
         self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
+        self.declare_parameter('start_delay', 10.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队
 
         self._mode   = str(self.get_parameter('mode').value)
         self._x0     = float(self.get_parameter('start_x').value)
@@ -70,12 +71,14 @@ class LeaderNode(Node):
         self._t  = 0.0
         self._dt = 1.0 / hz
         self._max_distance = float(self.get_parameter('max_distance').value)
+        self._start_delay = float(self.get_parameter('start_delay').value)
         self._initial_yaw = None   # 首次发布时记录
         self._current_yaw = 0.0    # 当前平滑后的 yaw（用于限幅）
 
         # line 模式：对准阶段
         self._line_align_done = False
-        self._line_align_duration = 1.0  # 对准耗时 (s)
+        self._line_start_t = 0.0    # 对准完成、开始平移时的运动时钟
+        self._hold_logged = False   # 起飞等待提示只打一次
 
         self._pub = self.create_publisher(Float64MultiArray, '/leader/state', 10)
         self.create_timer(self._dt, self._tick)
@@ -116,12 +119,29 @@ class LeaderNode(Node):
         # 读取运行时参数（支持 ros2 param set 动态切换）
         self._mode = str(self.get_parameter('mode').value)
 
+        # 起飞等待：前 start_delay 秒 leader 在原点不动，给僚机 ARM+爬升+组队留时间，
+        # 避免它们从落后状态边爬边追导致 QP 失败/到点过冲。之后用 t_move 作运动时钟。
+        t_move = t - self._start_delay
+        if t_move < 0.0:
+            if not self._hold_logged:
+                self.get_logger().info(
+                    f'leader holding at start for {self._start_delay:.1f}s '
+                    f'(let drones arm/climb/form up)...')
+                self._hold_logged = True
+            x, y = self._x0, self._y0
+            vx, vy = 0.0, 0.0
+            yaw = self._apply_yaw_limits(self._compute_raw_yaw(x, y, vx, vy))
+            msg = Float64MultiArray()
+            msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw]
+            self._pub.publish(msg)
+            return
+
         if self._mode == 'circle':
             omega = self._speed / max(self._radius, 0.1)
-            x   =  self._x0 + self._radius * math.cos(omega * t)
-            y   =  self._y0 + self._radius * math.sin(omega * t)
-            vx  = -self._radius * omega * math.sin(omega * t)
-            vy  =  self._radius * omega * math.cos(omega * t)
+            x   =  self._x0 + self._radius * math.cos(omega * t_move)
+            y   =  self._y0 + self._radius * math.sin(omega * t_move)
+            vx  = -self._radius * omega * math.sin(omega * t_move)
+            vy  =  self._radius * omega * math.cos(omega * t_move)
             raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
             yaw = self._apply_yaw_limits(raw_yaw)
 
@@ -136,11 +156,12 @@ class LeaderNode(Node):
                 yaw = self._apply_yaw_limits(target_yaw)
                 if abs(_wrap_angle(yaw - target_yaw)) < math.radians(2.0):
                     self._line_align_done = True
+                    self._line_start_t = t_move   # 记录开始平移时刻
                     self.get_logger().info(f'Yaw aligned to {math.degrees(yaw):.1f}°, starting line motion')
                 # 对准阶段不移动
                 vx, vy = 0.0, 0.0
             else:
-                x = self._x0 + self._speed * (t - self._line_align_duration)
+                x = self._x0 + self._speed * (t_move - self._line_start_t)
                 y = self._y0
                 # 到达最大距离后悬停
                 dist = abs(x - self._x0)
