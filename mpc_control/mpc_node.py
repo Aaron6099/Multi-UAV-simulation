@@ -272,6 +272,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('startup_zero_vel_frames', 30)
         # 校准 world_birth 前,要求 EKF 连续 valid 的帧数(等 GPS fix 收敛)
         self.declare_parameter('calib_settle_frames', 25)
+        # 校准窗口：只在 local 连续 calib_stable_window 帧"极差 < tol"时才锁定，
+        # 不看绝对值(对恒定偏置也成立)，x/y/z 统一生效
+        self.declare_parameter('calib_stable_window', 40)     # 稳定性判定窗口(帧)
+        self.declare_parameter('calib_stable_tol',    0.05)   # m，窗口三轴极差上限
+        self.declare_parameter('calib_timeout_frames', 600)   # 兜底，防永不收敛死锁
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -323,6 +328,10 @@ class MpcControllerNode(Node):
         self.neighbour_timeout = float(self.get_parameter('neighbour_timeout').value)
         self.startup_zero_vel_frames = int(self.get_parameter('startup_zero_vel_frames').value)
         self.calib_settle_frames = max(1, int(self.get_parameter('calib_settle_frames').value))
+        self.calib_stable_window = max(2, int(self.get_parameter('calib_stable_window').value))
+        self.calib_stable_tol    = float(self.get_parameter('calib_stable_tol').value)
+        self.calib_timeout_frames = max(self.calib_settle_frames,
+                                        int(self.get_parameter('calib_timeout_frames').value))
 
         N        = int(self.get_parameter('mpc_horizon').value)
         mpc_dt   = float(self.get_parameter('mpc_dt').value)
@@ -364,6 +373,8 @@ class MpcControllerNode(Node):
         self._pos_calibrated = [False] * self.num_drones
         # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
         self._valid_streak = [0] * self.num_drones
+        # 校准滚动窗口：最近若干帧的 local (x,y,z)，用于稳定性门控
+        self._calib_win = [[] for _ in range(self.num_drones)]
 
         # MPC
         self.N = N
@@ -505,23 +516,39 @@ class MpcControllerNode(Node):
                           and math.isfinite(msg.z))
                 if not pos_ok:
                     self._valid_streak[drone_idx] = 0
+                    self._calib_win[drone_idx].clear()
                     return
                 self._valid_streak[drone_idx] += 1
-                if self._valid_streak[drone_idx] < self.calib_settle_frames:
+
+                # 滚动窗口：不数绝对值，只看 local 是否已"停止漂移"
+                win = self._calib_win[drone_idx]
+                win.append((msg.x, msg.y, msg.z))
+                if len(win) > self.calib_stable_window:
+                    win.pop(0)
+
+                arr = np.array(win)
+                spread = (arr.max(0) - arr.min(0)) if len(win) >= 2 else np.full(3, np.inf)
+                stable = (self._valid_streak[drone_idx] >= self.calib_settle_frames
+                          and len(win) >= self.calib_stable_window
+                          and float(spread.max()) < self.calib_stable_tol)
+                timed_out = self._valid_streak[drone_idx] >= self.calib_timeout_frames
+                if not (stable or timed_out):
                     return
-                # 用收敛后的稳定 local 当基准:校准时刻 world_pos == birth_pos
-                first_local = np.array([msg.x, msg.y, msg.z])
+
+                # 用收敛后的窗口均值当基准(抹平单帧噪声),而非抖动单帧
+                first_local = arr.mean(0)
                 self.world_birth[drone_idx] = (
                     self.birth_positions[drone_idx] - first_local
                 )
                 self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
                 self._prev_z_reset[drone_idx] = msg.z_reset_counter
                 self._pos_calibrated[drone_idx] = True
+                tag = 'STABLE' if stable else 'TIMEOUT(not converged)'
                 self.get_logger().info(
                     f'first position from drone {drone_idx} '
-                    f'(calibrated after {self._valid_streak[drone_idx]} valid frames, '
-                    f'xy_valid={msg.xy_valid}, z_valid={msg.z_valid}): '
-                    f'local=({msg.x:.2f}, {msg.y:.2f}, {msg.z:.2f}) '
+                    f'(calibrated [{tag}] after {self._valid_streak[drone_idx]} frames, '
+                    f'spread=({spread[0]:.3f},{spread[1]:.3f},{spread[2]:.3f})): '
+                    f'local_mean=({first_local[0]:.2f}, {first_local[1]:.2f}, {first_local[2]:.2f}) '
                     f'world_birth=({self.world_birth[drone_idx,0]:.2f}, '
                     f'{self.world_birth[drone_idx,1]:.2f}, '
                     f'{self.world_birth[drone_idx,2]:.2f})'
