@@ -138,8 +138,12 @@ class LeaderNode(Node):
 
         if self._mode == 'circle':
             omega = self._speed / max(self._radius, 0.1)
-            x   =  self._x0 + self._radius * math.cos(omega * t_move)
-            y   =  self._y0 + self._radius * math.sin(omega * t_move)
+            # 圆心在出生点正西，使 t_move=0 时 leader 正好在出生点 (x0,y0)
+            # 避免从 hold 切到 circle 时的 10m 位置阶跃
+            cx = self._x0 - self._radius
+            cy = self._y0
+            x   =  cx + self._radius * math.cos(omega * t_move)
+            y   =  cy + self._radius * math.sin(omega * t_move)
             vx  = -self._radius * omega * math.sin(omega * t_move)
             vy  =  self._radius * omega * math.cos(omega * t_move)
             raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
