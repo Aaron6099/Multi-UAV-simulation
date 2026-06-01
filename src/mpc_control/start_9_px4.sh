@@ -50,8 +50,16 @@ declare -a POSES=(
 )
 
 START_DELAY="${START_DELAY:-30}"  # seconds between successive instances
+NUM_DRONES="${NUM_DRONES:-9}"     # number of PX4 instances to start (2..9)
 
-for i in $(seq 0 8); do
+if [ "$NUM_DRONES" -lt 1 ] || [ "$NUM_DRONES" -gt 9 ]; then
+    echo "ERROR: NUM_DRONES must be 1..9, got $NUM_DRONES"
+    exit 1
+fi
+
+LAST=$((NUM_DRONES - 1))
+
+for i in $(seq 0 $LAST); do
     POSE="${POSES[$i]}"
     echo "Starting drone $i with PX4_GZ_MODEL_POSE=$POSE ..."
 
@@ -83,14 +91,14 @@ for i in $(seq 0 8); do
     fi
 
     # Wait between instances to give PX4 + Gazebo time to settle
-    if [ $i -lt 8 ]; then
+    if [ $i -lt $LAST ]; then
         echo "  waiting ${START_DELAY}s before next instance..."
         sleep "$START_DELAY"
     fi
 done
 
 echo ""
-echo "All 9 PX4 instances launched. Now in separate terminals, run:"
+echo "All $NUM_DRONES PX4 instances launched. Now in separate terminals, run:"
 echo "  Terminal A:  MicroXRCEAgent udp4 -p 8888"
 echo "  Terminal B:  cd ~/ros2_multi_offboard_ws && source install/setup.bash"
-echo "               ros2 launch flocking_swarm swarm_launch.py"
+echo "               ros2 launch mpc_control swarm_launch.py formation:=line2"

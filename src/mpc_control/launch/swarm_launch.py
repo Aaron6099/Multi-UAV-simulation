@@ -1,111 +1,141 @@
 #!/usr/bin/env python3
 """
-Launches the MPC swarm — 5-drone version (cross topology).
+Launches the MPC swarm with selectable formation.
 
-Cross topology (subset of original 9-drone grid):
+Usage:
+  ros2 launch mpc_control swarm_launch.py                  # default: cross5
+  ros2 launch mpc_control swarm_launch.py formation:=line2 # 2-drone line
+  ros2 launch mpc_control swarm_launch.py formation:=cross5
 
-             3 (north)
-             │
-   2 (west) ─ 0 (center) ─ 1 (east)
-             │
-             4 (south)
-
-  - 1 virtual_leader_node
-  - 5 mpc_node (drone_id=0..4)
-  - 1 arming_node
-
-Leader speed is 0.0 — drones should converge to a static cross at z=-5.
-After hover is verified, raise leader speed in steps (0.5 -> 1.0 -> 2.0).
+Formations:
+  line2  — 2 drones, 3m apart (east-west)
+  cross5 — 5 drones, cross topology, 3m spacing
 """
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 # =====================================================================
-# Configuration
+# Formation definitions
 # =====================================================================
 
-NUM_DRONES = 5
-
-# Spawn positions in WORLD-NED (x=north, y=east, z=down).
-# Only 5 entries — must match NUM_DRONES.
-BIRTH_POSITIONS_FLAT = [
-    0.0,  0.0, 0.0,   # 0: center
-    0.0,  3.0, 0.0,   # 1: east
-    0.0, -3.0, 0.0,   # 2: west
-    3.0,  0.0, 0.0,   # 3: north
-   -3.0,  0.0, 0.0,   # 4: south
-]
-
-# Same shape as spawn = formation translates to wherever the leader goes.
-FORMATION_OFFSETS_FLAT = BIRTH_POSITIONS_FLAT
-
-# Sparse cross topology — leader is implicit.
-NEIGHBOURS_PER_DRONE = {
-    0: [1, 2, 3, 4],        # center sees all 4 arms
-    1: [0],                 # east sees center
-    2: [0],                 # west sees center
-    3: [0],                 # north sees center
-    4: [0],                 # south sees center
-}
-
-COMMON_PARAMS = {
-    'num_drones': NUM_DRONES,
-    'birth_positions_flat': BIRTH_POSITIONS_FLAT,
-    'formation_offsets_flat': FORMATION_OFFSETS_FLAT,
-
-    'target_alt': -5.0,
-    'max_speed': 5.0,
-    'max_climb': 1.5,
-    'max_accel': 5.0,
-
-    'control_hz': 50.0,
-    'neighbour_timeout': 1.0,
-    'startup_zero_vel_frames': 30,
-
-    # MPC weights — tuned values from this session
-    'mpc_horizon': 20,
-    'mpc_dt':      0.05,
-    'q_pos':       8.0,
-    'q_vel':       2.0,
-    'r_acc':       0.05,
-    'q_pos_terminal_scale': 2.0,
-    'd_safe':      1.5,
-    'w_collision': 500.0,
-    'w_formation': 0.5,
-    'acados_build_dir': '/tmp/acados_di_mpc',
-}
-
-LEADER_PARAMS = {
-    'speed': 1.0,                    # static hover test first
-    'altitude': -5.0,
-    'publish_hz': 50.0,
-    'waypoints_flat': [0.0, 0.0,  0.0, 50.0,  50.0, 50.0,  50.0, 0.0],
-}
-
-ARMING_PARAMS = {
-    'num_drones': NUM_DRONES,        # 5, must match
-    'setup_seconds': 20.0,           # acados compiles faster for 5 drones
-    'arm_interval': 0.5,
+FORMATIONS = {
+    'line2': {
+        'birth': [
+            0.0,  0.0, 0.0,   # 0: center
+            0.0,  3.0, 0.0,   # 1: east
+        ],
+        'neighbours': {
+            0: [1],
+            1: [0],
+        },
+    },
+    'cross5': {
+        'birth': [
+            0.0,  0.0, 0.0,   # 0: center
+            0.0,  3.0, 0.0,   # 1: east
+            0.0, -3.0, 0.0,   # 2: west
+            3.0,  0.0, 0.0,   # 3: north
+           -3.0,  0.0, 0.0,   # 4: south
+        ],
+        'neighbours': {
+            0: [1, 2, 3, 4],
+            1: [0],
+            2: [0],
+            3: [0],
+            4: [0],
+        },
+    },
 }
 
 
 def generate_launch_description():
-    nodes = []
+    formation_arg = DeclareLaunchArgument(
+        'formation', default_value='cross5',
+        description='Formation type: line2, cross5',
+    )
+    leader_speed_arg = DeclareLaunchArgument(
+        'leader_speed', default_value='0.0',
+        description='Leader speed (m/s). 0=hover, >0=move along waypoints',
+    )
+
+    # We resolve the formation at launch-gen time via a shim:
+    # ros2 launch passes 'formation:=line2' which DeclareLaunchArgument
+    # stores, but LaunchConfiguration is only resolved at runtime.
+    # Since we need NUM_DRONES at parse time for the for-loop, we
+    # parse sys.argv directly as a fallback.
+    import sys
+    resolved = 'cross5'
+    ldr_speed = 0.0
+    for a in sys.argv:
+        if 'formation:=' in a:
+            resolved = a.split(':=')[-1]
+        if 'leader_speed:=' in a:
+            ldr_speed = float(a.split(':=')[-1])
+
+    if resolved not in FORMATIONS:
+        raise ValueError(
+            f'Unknown formation "{resolved}". '
+            f'Choose from: {list(FORMATIONS.keys())}')
+
+    cfg = FORMATIONS[resolved]
+    num_drones = len(cfg['birth']) // 3
+    births = cfg['birth']
+    neighbours = cfg['neighbours']
+
+    common = {
+        'num_drones': num_drones,
+        'birth_positions_flat': births,
+        'formation_offsets_flat': births,
+        'target_alt': -5.0,
+        'max_speed': 5.0,
+        'max_climb': 1.5,
+        'max_accel': 5.0,
+        'control_hz': 50.0,
+        'neighbour_timeout': 1.0,
+        'startup_zero_vel_frames': 30,
+        'mpc_horizon': 20,
+        'mpc_dt':      0.05,
+        'q_pos':       8.0,
+        'q_vel':       2.0,
+        'r_acc':       0.05,
+        'q_pos_terminal_scale': 2.0,
+        'd_safe':      1.5,
+        'w_collision': 500.0,
+        'w_formation': 0.5,
+        'acados_build_dir': '/tmp/acados_di_mpc',
+    }
+
+    leader = {
+        'speed': ldr_speed,
+        'altitude': -5.0,
+        'publish_hz': 50.0,
+        'waypoints_flat': [0.0, 0.0,  0.0, 50.0,  50.0, 50.0,  50.0, 0.0],
+    }
+
+    arming = {
+        'num_drones': num_drones,
+        'setup_seconds': 15.0 if num_drones <= 2 else 20.0,
+        'arm_interval': 0.5,
+    }
+
+    nodes = [formation_arg, leader_speed_arg]
 
     nodes.append(Node(
         package='mpc_control',
         executable='virtual_leader_node',
         name='virtual_leader',
         output='screen',
-        parameters=[LEADER_PARAMS],
+        parameters=[leader],
     ))
 
-    for i in range(NUM_DRONES):
-        params = dict(COMMON_PARAMS)
+    for i in range(num_drones):
+        params = dict(common)
         params['drone_id'] = i
-        params['neighbours'] = NEIGHBOURS_PER_DRONE[i]
+        params['neighbours'] = neighbours[i]
         nodes.append(Node(
             package='mpc_control',
             executable='mpc_node',
@@ -119,7 +149,7 @@ def generate_launch_description():
         executable='arming_node',
         name='arming_node',
         output='screen',
-        parameters=[ARMING_PARAMS],
+        parameters=[arming],
     ))
 
     return LaunchDescription(nodes)
