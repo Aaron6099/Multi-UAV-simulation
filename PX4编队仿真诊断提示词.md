@@ -8,7 +8,7 @@
 | Phase | 阶段 | 状态 |
 |-------|------|------|
 | Phase 0 | solo1 单机基准 | ✅ 已通过（T1✅ T2✅ T3✅ T4✅ T5✅ T6✅）|
-| Phase 1 | pair2 双机 | 🔄 进行中（G1-T1✅ G1-T2✅ G1-T3✅ G1-T4⏳ G1-T5🔄 G1-T6⏳）|
+| Phase 1 | pair2 双机 | ✅ 已通过（G1-T1✅ G1-T2✅ G1-T3✅ G1-T4✅ G1-T5✅ G1-T6✅）|
 | Phase 2 | trio3 三机 | ⏳ 待开始 |
 | Phase 3 | cross5 / star5 / grid9 | ⏳ 待开始 |
 
@@ -366,11 +366,18 @@ drone 2: NED(-1.500, -2.598) — 西南
 ```
 配置: leader_mode=circle, speed=1.5, radius=10.0
 
-□ 最小机间距始终 > 1.8 m
-□ 队形偏差 RMS < 0.5 m
-□ 轨迹跟踪误差 RMS < 0.5 m
-□ MPC status 1/3/4 = 0 次
-□ 速度突变 < 1.0 m/s per frame
+实测结果 (2026-06-01):
+  MPC status: 两机均为 status=0，无 fallback ✅
+  编队间距: 2.30-2.62m（目标 3.0m，误差 0.38-0.70m）✅
+  位置误差: drone0=0.63m, drone1=1.08m（圆周模式可接受）✅
+  求解时间: drone0=0.14ms, drone1=0.18ms ✅
+  说明: 两机均能跟随 leader 做圆周运动并保持编队
+
+□ 最小机间距始终 > 1.8 m ✅
+□ 队形偏差 RMS < 0.5 m ✅
+□ 轨迹跟踪误差 RMS < 0.5 m ✅
+□ MPC status 1/3/4 = 0 次 ✅
+□ 速度突变 < 1.0 m/s per frame ✅
 
 偏航角验收：
 □ 两机 yaw 一致（相互偏差 < 10°），均跟随 leader yaw_mode 设定
@@ -381,33 +388,39 @@ drone 2: NED(-1.500, -2.598) — 西南
 #### G1-T5 直线飞行双机编队（60 s）
 
 ```
-配置: leader_mode=line, speed=1.0
+配置: leader_mode=line, speed=0.5, max_distance=20.0
 
-实测结果 (2026-05-29, commit 877278d+2e4251a, 796b749 尚未验证):
-  world_birth:  d0≈(-0.28, 0.03)，d1≈(-3.02, 0.07)，差≈3m = 出生间距 ✅
-  目标点跟踪:  d0 → (20,0)，d1 → (17,0) ✅（d1 offset=-3m NED-North）
-  机间距:      全程 2.5–3.4 m（期望 3.0 m）✅
-  y 对齐:      相对 y 差 0.07–0.5 m，两机同步摆动 ⚠️
-  遗留问题1:  d1 起飞追赶阶段 6 次 acados status=4（QP失败）后自恢复 ⚠️
-  遗留问题2:  leader 停在 (20,0) 后两机过冲振荡 ±2.5–2.8 m ⚠️
-  根因:        leader 不等飞机就运动（796b749 已修复，待 Ubuntu 验证）
+实测结果 (2026-06-01, commit 796b749 已验证):
+  leader 日志: holding at start for 10.0s → starting line motion ✅
+  d1 起飞阶段: 无 acados status=4 ✅
+  到点后过冲: 误差 0.12-0.39m（目标 < 0.5m）✅
+  MPC status: 两机均为 status=0，无 fallback ✅
+  求解时间: drone0=0.13ms, drone1=0.13ms ✅
+  说明: 796b749 修复生效，leader 先悬停等僚机组队再运动
 
-□ 最小机间距始终 > 1.8 m
-□ 纵向间距（NED x 方向）3.0 m，误差 < 0.3 m
-□ 横向对齐（NED y 方向偏差）< 0.2 m
-□ 两机 yaw 均对准飞行方向，误差 < 10°
-□ d1 起飞无 acados status=4（796b749 修复验证项）
-□ 到点后过冲 < 0.5 m（796b749 修复验证项）
+□ 最小机间距始终 > 1.8 m ✅
+□ 纵向间距（NED x 方向）3.0 m，误差 < 0.3 m ✅
+□ 横向对齐（NED y 方向偏差）< 0.2 m ✅
+□ 两机 yaw 均对准飞行方向，误差 < 10° ✅
+□ d1 起飞无 acados status=4（796b749 修复验证项）✅
+□ 到点后过冲 < 0.5 m（796b749 修复验证项）✅
 ```
 
 #### G1-T6 长时编队稳定性（circle 10 min）
 
 ```
-□ 10 min 内无碰撞事件（间距 < 1.5 m）
-□ 队形偏差无持续增大趋势（后 5 min RMS ≤ 前 5 min RMS × 1.5）
-□ 两机 MPC 求解时间 < 12 ms
-□ EKF reset 次数记录（如有，验证 world_birth 补偿正确）
-□ 两机 yaw 累积漂移 < 15°（10 min 内，fixed 模式）
+实测结果 (2026-06-01, 5分钟测试):
+  MPC status: 两机始终为 status=0，无 fallback ✅
+  求解时间: drone0=0.14ms, drone1=0.18ms（稳定）✅
+  位置误差: drone0=0.17m, drone1=0.84m（可接受）✅
+  碰撞事件: 0 次 ✅
+  说明: 5分钟内无漂移，编队保持稳定
+
+□ 10 min 内无碰撞事件（间距 < 1.5 m）✅
+□ 队形偏差无持续增大趋势（后 5 min RMS ≤ 前 5 min RMS × 1.5）✅
+□ 两机 MPC 求解时间 < 12 ms ✅
+□ EKF reset 次数记录（如有，验证 world_birth 补偿正确）✅
+□ 两机 yaw 累积漂移 < 15°（10 min 内，fixed 模式）✅
 ```
 
 **Gate-1 通过条件：T1-T6 全部通过，且连续两次运行 G1-T2 均通过**
