@@ -495,12 +495,15 @@ class MpcControllerNode(Node):
                         f'{self.world_birth[drone_idx,1]:+.2f})'
                     )
                     self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
+                # Z reset 不补偿进 world_birth：z 已决定直接以 local 系为基准
+                # (world_birth_z 恒为 birth_z)。z_reset 是 EKF 自我修正，应直接跟随
+                # 修正后的 local_z；若像 xy 那样累加 -= delta_z，会逐次把 world_birth_z
+                # 推离 birth_z，使 ds.pos 与真实高度脱钩(MPC 自以为到点、实际偏数米)。
+                # 仅记录，频繁/大幅 z_reset 说明该机 EKF 垂直融合不健康，单独查。
                 if msg.z_reset_counter > self._prev_z_reset[drone_idx]:
-                    self.world_birth[drone_idx, 2] -= float(msg.delta_z)
                     self.get_logger().warn(
                         f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
-                        f'delta={msg.delta_z:+.2f}; '
-                        f'world_birth z -> {self.world_birth[drone_idx,2]:+.2f}'
+                        f'delta={msg.delta_z:+.2f} (NOT compensated; z 跟随 local 系)'
                     )
                     self._prev_z_reset[drone_idx] = msg.z_reset_counter
 
