@@ -540,6 +540,12 @@ class MpcControllerNode(Node):
                 self.world_birth[drone_idx] = (
                     self.birth_positions[drone_idx] - first_local
                 )
+                # Z 不做校准偏移：三机同地面起飞，各 EKF 的 local z 原点即同一地面，
+                # 本就重合、无需偏移；校准时抓到的 first_local_z 只是会衰减到~0 的
+                # 启动暂态，烤进 world_birth 反而让各机悬停高度不一致。
+                # 故 z 直接以 local 系为准(world_birth_z = birth_z，平地即 0)。
+                # XY 仍需校准：各机 EKF 原点在各自出生点，必须偏移到同一世界系。
+                self.world_birth[drone_idx, 2] = self.birth_positions[drone_idx, 2]
                 self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
                 self._prev_z_reset[drone_idx] = msg.z_reset_counter
                 self._pos_calibrated[drone_idx] = True
