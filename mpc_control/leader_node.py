@@ -58,7 +58,7 @@ class LeaderNode(Node):
         self.declare_parameter('radius',     10.0)      # circle 半径 m
         self.declare_parameter('publish_hz', 50.0)
         self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
-        self.declare_parameter('start_delay', 10.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队
+        self.declare_parameter('start_delay', 30.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队（10s 太短，launch 默认同步为 30）
 
         self._mode   = str(self.get_parameter('mode').value)
         self._x0     = float(self.get_parameter('start_x').value)

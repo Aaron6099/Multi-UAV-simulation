@@ -247,8 +247,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'leader_start_delay',
-            default_value='10.0',
-            description='leader 起飞等待秒数：先原地不动，等僚机 ARM+爬升+组队再开始运动',
+            default_value='30.0',
+            description='leader 起飞等待秒数：先原地不动，等僚机 ARM+爬升+组队再开始运动。'
+                        '10s 太短(三机 stability-gate 校准就需~10s，再加爬升/组队)，故默认 30s；'
+                        '更鲁棒、可扩到 5/9 机免调的做法是 leader_node 闭环就绪门控(订阅各机 health.pos_err)——待做',
         ),
         OpaqueFunction(function=_make_nodes),
     ])
