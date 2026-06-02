@@ -277,6 +277,8 @@ class MpcControllerNode(Node):
         self.declare_parameter('calib_stable_window', 40)     # 稳定性判定窗口(帧)
         self.declare_parameter('calib_stable_tol',    0.05)   # m，窗口三轴极差上限
         self.declare_parameter('calib_timeout_frames', 600)   # 兜底，防永不收敛死锁
+        # EKF 收敛后静止于自身 local 原点，|local_xy| 必接近 0；仍几十米=GPS fix 前暂态，拒绝锁定
+        self.declare_parameter('calib_max_origin_offset', 2.0)  # m，校准锁定时 |local_xy| 上限
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -332,6 +334,7 @@ class MpcControllerNode(Node):
         self.calib_stable_tol    = float(self.get_parameter('calib_stable_tol').value)
         self.calib_timeout_frames = max(self.calib_settle_frames,
                                         int(self.get_parameter('calib_timeout_frames').value))
+        self.calib_max_origin_offset = float(self.get_parameter('calib_max_origin_offset').value)
 
         N        = int(self.get_parameter('mpc_horizon').value)
         mpc_dt   = float(self.get_parameter('mpc_dt').value)
@@ -526,10 +529,6 @@ class MpcControllerNode(Node):
                     return
                 self._valid_streak[drone_idx] += 1
 
-                # 捕获 EKF 参考海拔（首次收到有效位置时）
-                if self._ref_alt[drone_idx] is None and hasattr(msg, 'ref_alt') and msg.ref_alt > 0:
-                    self._ref_alt[drone_idx] = float(msg.ref_alt)
-
                 # 滚动窗口：不数绝对值，只看 local 是否已"停止漂移"
                 win = self._calib_win[drone_idx]
                 win.append((msg.x, msg.y, msg.z))
@@ -538,15 +537,31 @@ class MpcControllerNode(Node):
 
                 arr = np.array(win)
                 spread = (arr.max(0) - arr.min(0)) if len(win) >= 2 else np.full(3, np.inf)
+                # 用收敛后的窗口均值当基准(抹平单帧噪声),而非抖动单帧
+                first_local = arr.mean(0)
                 stable = (self._valid_streak[drone_idx] >= self.calib_settle_frames
                           and len(win) >= self.calib_stable_window
                           and float(spread.max()) < self.calib_stable_tol)
                 timed_out = self._valid_streak[drone_idx] >= self.calib_timeout_frames
+
+                # 绝对门控：EKF 收敛后静止时 |local_xy|≈0；仍几十米=GPS fix 前暂态，
+                # 绝不烤进 world_birth(否则机间世界系不一致→编队塌缩)。timeout 也不放行，
+                # 只升级为告警；未校准时各机保持出生点悬停(天然间距)，安全可查。
+                near_origin = float(np.linalg.norm(first_local[:2])) < self.calib_max_origin_offset
+                if not near_origin:
+                    if timed_out and self._valid_streak[drone_idx] % 50 == 0:
+                        self.get_logger().error(
+                            f'[veh {drone_idx}] calib STUCK: |local_xy|='
+                            f'{float(np.linalg.norm(first_local[:2])):.1f}m 远离原点'
+                            f'(EKF 未 fix?)，拒绝校准→保持出生点悬停'
+                        )
+                    return
                 if not (stable or timed_out):
                     return
 
-                # 用收敛后的窗口均值当基准(抹平单帧噪声),而非抖动单帧
-                first_local = arr.mean(0)
+                # 锁定时抓 ref_alt(此刻 EKF 已收敛/GPS fix,避免冻结 fix 前暂态值)
+                if hasattr(msg, 'ref_alt') and math.isfinite(msg.ref_alt) and msg.ref_alt > 0:
+                    self._ref_alt[drone_idx] = float(msg.ref_alt)
                 self.world_birth[drone_idx] = (
                     self.birth_positions[drone_idx] - first_local
                 )
