@@ -776,12 +776,14 @@ class MpcControllerNode(Node):
         vel_correction = np.clip(pos_err_vec * Kp_pos, -self.max_speed, self.max_speed)
 
         # Blend: MPC velocity + position correction
-        # For horizontal: use MPC velocity (dynamic tracking)
-        # For vertical: use position correction (altitude hold)
+        # 横向：直接用 MPC 优化速度。原先叠加 0.5·Kp·pos_err 的外层纯比例 P 环，
+        # 在已最优的 MPC 上再套一层无阻尼比例修正 → 僚机过冲、圆周震荡。MPC 内部
+        # 已含 q_pos/q_vel 与速度前馈(ref 的 vel+acc·t)，横向跟踪交给它即可。
+        # 垂直：保留纯 P(高度保持，与横向解耦，不引起震荡)。
         vel_sp = np.zeros(3)
-        vel_sp[0] = pred_vel[0] + vel_correction[0] * 0.5  # MPC dominant
-        vel_sp[1] = pred_vel[1] + vel_correction[1] * 0.5  # MPC dominant
-        vel_sp[2] = vel_correction[2]  # pure P-controller for z
+        vel_sp[0] = pred_vel[0]
+        vel_sp[1] = pred_vel[1]
+        vel_sp[2] = vel_correction[2]  # pure P-controller for z (altitude hold)
 
         # Clip to limits
         vel_xy_norm = float(np.linalg.norm(vel_sp[:2]))
@@ -796,6 +798,27 @@ class MpcControllerNode(Node):
         # Position error for logging
         pos_err = float(np.linalg.norm(pos_err_vec[:2]))
         self._last_pos_err = pos_err
+
+        # ── 诊断：横向跟踪误差分解为 radial(径向)/tangential(切向)，1Hz ──
+        # 切向 = leader 速度方向；径向 = 向心加速度反向(指向圆外)；圆周时二者正交。
+        #   e_tan > 0 → 参考在前方，僚机滞后(切向滞后/相位问题)
+        #   e_rad > 0 → 参考更靠外，僚机切内圈(径向/曲率/增益问题)
+        # 看震荡主要落在哪个分量，即可定位机理(切向=速度前馈/相位；径向=曲率/增益)。
+        if self._dbg_counter % int(self.control_hz) == 0:
+            v_xy = self.leader_vel[:2]
+            a_xy = self.leader_acc[:2]
+            v_norm = float(np.linalg.norm(v_xy))
+            a_norm = float(np.linalg.norm(a_xy))
+            if v_norm > 1e-3 and a_norm > 1e-3:
+                t_hat = v_xy / v_norm        # 切向(运动方向)
+                r_hat = -a_xy / a_norm       # 径向向外(向心反向)
+                e_tan = float(np.dot(pos_err_vec[:2], t_hat))
+                e_rad = float(np.dot(pos_err_vec[:2], r_hat))
+                self.get_logger().info(
+                    f'[d{self.drone_id}] track-err total={pos_err:.3f}m '
+                    f'radial={e_rad:+.3f} tangential={e_tan:+.3f} '
+                    f'(|v|={v_norm:.2f} |a|={a_norm:.2f})'
+                )
 
         self._publish_health()
         self.publish_velocity_setpoint(vel_sp, yaw_sp)
