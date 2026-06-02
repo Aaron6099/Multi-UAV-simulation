@@ -151,7 +151,7 @@ COMMON = {
     'neighbour_timeout':        2.0,   # 从0.5增至2.0：容忍通信延迟，减少错误降级
     'startup_zero_vel_frames':  100,   # 从50增至100：2s，给EKF更多收敛时间（多机尤其重要）
     'calib_settle_frames':       25,   # world_birth 校准前要求 EKF 连续 valid 的帧数(~0.5s)，防止用上电瞬态值校准
-    'mpc_horizon':              20,
+    'mpc_horizon':              30,    # 20→30：预测时域 1s→1.5s，改善圆周运动跟踪
     'mpc_dt':                 0.05,
     'q_pos':                   4.0,
     'q_vel':                   2.0,

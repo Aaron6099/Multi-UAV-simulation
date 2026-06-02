@@ -130,9 +130,10 @@ class LeaderNode(Node):
                 self._hold_logged = True
             x, y = self._x0, self._y0
             vx, vy = 0.0, 0.0
+            ax, ay = 0.0, 0.0
             yaw = self._apply_yaw_limits(self._compute_raw_yaw(x, y, vx, vy))
             msg = Float64MultiArray()
-            msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw]
+            msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw, ax, ay]
             self._pub.publish(msg)
             return
 
@@ -146,12 +147,16 @@ class LeaderNode(Node):
             y   =  cy + self._radius * math.sin(omega * t_move)
             vx  = -self._radius * omega * math.sin(omega * t_move)
             vy  =  self._radius * omega * math.cos(omega * t_move)
+            # 向心加速度：a = -ω²r，方向指向圆心
+            ax  = -omega * vy   # = -ω² * radius * cos(ωt)
+            ay  =  omega * vx   # = -ω² * radius * sin(ωt)
             raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
             yaw = self._apply_yaw_limits(raw_yaw)
 
         elif self._mode == 'line':
             vx = self._speed
             vy = 0.0
+            ax, ay = 0.0, 0.0
 
             # Phase 1: 对准阶段 — 先转 yaw，再开始移动
             if not self._line_align_done:
@@ -178,11 +183,12 @@ class LeaderNode(Node):
         else:  # hover
             x, y   = self._x0, self._y0
             vx, vy = 0.0, 0.0
+            ax, ay = 0.0, 0.0
             raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
             yaw = self._apply_yaw_limits(raw_yaw)
 
         msg = Float64MultiArray()
-        msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw]
+        msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw, ax, ay]
         self._pub.publish(msg)
 
 
