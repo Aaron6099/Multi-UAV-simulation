@@ -349,6 +349,7 @@ class MpcControllerNode(Node):
         self.leader_received = False
         self.leader_pos = np.zeros(3)
         self.leader_vel = np.zeros(3)
+        self.leader_acc = np.zeros(3)   # 向心加速度（圆周运动）
         self.leader_yaw = 0.0
         self.attitude_yaw = 0.0
         self.attitude_received = False
@@ -639,6 +640,13 @@ class MpcControllerNode(Node):
         self.leader_pos = np.array([msg.data[1], msg.data[2], msg.data[3]])
         self.leader_vel = np.array([msg.data[4], msg.data[5], msg.data[6]])
         self.leader_yaw = float(msg.data[7]) if math.isfinite(msg.data[7]) else 0.0
+        # 加速度（圆周运动向心加速度），向后兼容旧版 leader_node
+        if len(msg.data) >= 10:
+            ax = float(msg.data[8]) if math.isfinite(msg.data[8]) else 0.0
+            ay = float(msg.data[9]) if math.isfinite(msg.data[9]) else 0.0
+            self.leader_acc = np.array([ax, ay, 0.0])
+        else:
+            self.leader_acc = np.zeros(3)
 
     def _make_pred_callback(self, drone_idx):
         def cb(msg):
@@ -800,12 +808,17 @@ class MpcControllerNode(Node):
                            if np.all(np.isfinite(self.leader_pos)) else np.zeros(3))
         leader_vel_safe = (self.leader_vel.copy()
                            if np.all(np.isfinite(self.leader_vel)) else np.zeros(3))
+        leader_acc_safe = (self.leader_acc.copy()
+                           if np.all(np.isfinite(self.leader_acc)) else np.zeros(3))
         for k in range(N + 1):
             t = k * self.mpc_dt
-            pos = leader_pos_safe + leader_vel_safe * t + self.my_offset
+            # 二阶预测：pos + vel*t + 0.5*acc*t²（圆周运动时捕捉向心加速度）
+            pos = leader_pos_safe + leader_vel_safe * t + 0.5 * leader_acc_safe * t * t + self.my_offset
             pos[2] = self.target_alt
             x_ref[k, 0:3] = pos
-            x_ref[k, 3:5] = leader_vel_safe[:2]
+            # 速度前馈也随加速度变化：vel(t) = vel(0) + acc*t
+            vel_t = leader_vel_safe[:2] + leader_acc_safe[:2] * t
+            x_ref[k, 3:5] = vel_t
             x_ref[k, 5]   = 0.0
         return x_ref
 
