@@ -9,7 +9,7 @@
 |-------|------|------|
 | Phase 0 | solo1 单机基准 | ✅ 已通过（T1✅ T2✅ T3✅ T4✅ T5✅ T6✅）|
 | Phase 1 | pair2 双机 | ✅ 已通过（G1-T1✅ G1-T2✅ G1-T3✅ G1-T4✅ G1-T5✅ G1-T6✅）|
-| Phase 2 | trio3 三机 | ⏳ 待开始 |
+| Phase 2 | trio3 三机 | 🔄 进行中（G2-T1✅ G2-T2✅ G2-T3❌ 需加大leader_start_delay）|
 | Phase 3 | cross5 / star5 / grid9 | ⏳ 待开始 |
 
 > 每次完成一个 Gate 后在此处更新状态标记：✅ 已通过 / 🔄 进行中 / ⏳ 待开始 / ❌ 失败需返工
@@ -434,32 +434,55 @@ drone 2: NED(-1.500, -2.598) — 西南
 #### G2-T1 三机起飞健康检查
 
 ```
-□ 三机均在 45 s 内完成 ARM + OFFBOARD（三机启动时间差 < 5 s）
-□ 每机 desired_distances 正确（drone 0 与 drone 1/2 间距均 ≈ 5.196 m）
-□ 三机互相接收到所有邻居的 predicted_trajectory
-□ acados 缓存目录正确区分（检查 /tmp/acados_di_mpc_v0_m2、v1_m2、v2_m2 均存在）
+实测结果 (2026-06-01):
+  三机均完成 ARM + OFFBOARD ✅
+  acados 缓存目录正确区分 ✅
+  三机互相接收到邻居 predicted_trajectory ✅
+
+□ 三机均在 45 s 内完成 ARM + OFFBOARD（三机启动时间差 < 5 s）✅
+□ 每机 desired_distances 正确（drone 0 与 drone 1/2 间距均 ≈ 5.196 m）✅
+□ 三机互相接收到所有邻居的 predicted_trajectory ✅
+□ acados 缓存目录正确区分（检查 /tmp/acados_di_mpc_v0_m2、v1_m2、v2_m2 均存在）✅
 ```
 
 #### G2-T2 三机悬停编队保持（120 s）
 
 ```
-□ 最小机间距始终 > 1.8 m
-□ 队形偏差 < 0.5 m，95% 时间满足
-□ 三机高度差 < 0.2 m
-□ 三机 MPC 均无 status 1/3/4
-□ 碰撞事件 = 0 次
+实测结果 (2026-06-01):
+  最小间距: 5.04m >> 1.8m ✅
+  队形偏差: 0.01~0.17m < 0.5m ✅
+  高度差: 0.03m < 0.2m ✅
+  MPC status: 全部 0 ✅
+
+□ 最小机间距始终 > 1.8 m ✅
+□ 队形偏差 < 0.5 m，95% 时间满足 ✅
+□ 三机高度差 < 0.2 m ✅
+□ 三机 MPC 均无 status 1/3/4 ✅
+□ 碰撞事件 = 0 次 ✅
 
 偏航角验收：
-□ 三机 yaw 均锁定初始朝向，最大相互偏差 < 8°
-□ 无任意一机出现自旋行为
+□ 三机 yaw 均锁定初始朝向，最大相互偏差 < 8° ✅
+□ 无任意一机出现自旋行为 ✅
 ```
 
 #### G2-T3 MPC 求解负载验证
 
 ```
-□ 三机 MPC 求解时间均 < 12 ms（trio3 每机有 2 邻居，问题规模更大）
-□ 如求解时间 > 15 ms，记录哪架无人机并分析原因
-□ 10 min 圆周运动内无 status 1/3/4
+实测结果 (2026-06-01, 失败):
+  求解时间: drone0=0.13ms, drone1=0.14ms, drone2=0.26ms（< 12ms ✅）
+  MPC status: 全部 0，无 fallback ✅
+  但 drone2 cost=48.3（drone0/1 仅 1.6~2.7），说明 MPC 在挣扎
+  drone2 速度达 2.77 m/s（接近 max_speed=3.0），追赶 leader
+
+  失败原因: leader_start_delay=10s 不够，三机 ARM + EKF 收敛需更长时间
+  leader 开始圆周运动时三机尚未到编队位置 → 初始误差 10+ 米
+  → MPC 满速追赶仍追不上 → drone2 飞得快、drone0/1 飞得慢
+
+  修复方案: 加大 leader_start_delay（20~30s），或先 hover 确认到齐再切 circle
+
+□ 三机 MPC 求解时间均 < 12 ms（trio3 每机有 2 邻居，问题规模更大）✅
+□ 如求解时间 > 15 ms，记录哪架无人机并分析原因 ✅
+□ 10 min 圆周运动内无 status 1/3/4 ❌（leader_start_delay 不足，需重测）
 ```
 
 #### G2-T4 圆周运动三机编队（120 s）
