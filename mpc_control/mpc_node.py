@@ -371,6 +371,7 @@ class MpcControllerNode(Node):
         self._prev_xy_reset = [0] * self.num_drones
         self._prev_z_reset  = [0] * self.num_drones
         self._pos_calibrated = [False] * self.num_drones
+        self._ref_alt = [None] * self.num_drones   # 各机 EKF 参考海拔 (ref_alt from local_pos)
         # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
         self._valid_streak = [0] * self.num_drones
         # 校准滚动窗口：最近若干帧的 local (x,y,z)，用于稳定性门控
@@ -495,15 +496,16 @@ class MpcControllerNode(Node):
                         f'{self.world_birth[drone_idx,1]:+.2f})'
                     )
                     self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
-                # Z reset 不补偿进 world_birth：z 已决定直接以 local 系为基准
-                # (world_birth_z 恒为 birth_z)。z_reset 是 EKF 自我修正，应直接跟随
-                # 修正后的 local_z；若像 xy 那样累加 -= delta_z，会逐次把 world_birth_z
-                # 推离 birth_z，使 ds.pos 与真实高度脱钩(MPC 自以为到点、实际偏数米)。
-                # 仅记录，频繁/大幅 z_reset 说明该机 EKF 垂直融合不健康，单独查。
+                # Z reset：补偿 world_birth_z。
+                # z_reset 改变 local_z 与 GPS 海拔的对应关系。由于 world_birth_z
+                # 已用 GPS 海拔差校准，z_reset 后必须同步补偿，否则 MPC 世界坐标系
+                # 中 ds.pos 会跳变，导致各机高度不一致。
                 if msg.z_reset_counter > self._prev_z_reset[drone_idx]:
+                    self.world_birth[drone_idx, 2] -= float(msg.delta_z)
                     self.get_logger().warn(
                         f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
-                        f'delta={msg.delta_z:+.2f} (NOT compensated; z 跟随 local 系)'
+                        f'delta={msg.delta_z:+.2f}; '
+                        f'world_birth_z → {self.world_birth[drone_idx,2]:+.2f}'
                     )
                     self._prev_z_reset[drone_idx] = msg.z_reset_counter
 
@@ -522,6 +524,10 @@ class MpcControllerNode(Node):
                     self._calib_win[drone_idx].clear()
                     return
                 self._valid_streak[drone_idx] += 1
+
+                # 捕获 EKF 参考海拔（首次收到有效位置时）
+                if self._ref_alt[drone_idx] is None and hasattr(msg, 'ref_alt') and msg.ref_alt > 0:
+                    self._ref_alt[drone_idx] = float(msg.ref_alt)
 
                 # 滚动窗口：不数绝对值，只看 local 是否已"停止漂移"
                 win = self._calib_win[drone_idx]
@@ -543,12 +549,31 @@ class MpcControllerNode(Node):
                 self.world_birth[drone_idx] = (
                     self.birth_positions[drone_idx] - first_local
                 )
-                # Z 不做校准偏移：三机同地面起飞，各 EKF 的 local z 原点即同一地面，
-                # 本就重合、无需偏移；校准时抓到的 first_local_z 只是会衰减到~0 的
-                # 启动暂态，烤进 world_birth 反而让各机悬停高度不一致。
-                # 故 z 直接以 local 系为准(world_birth_z = birth_z，平地即 0)。
-                # XY 仍需校准：各机 EKF 原点在各自出生点，必须偏移到同一世界系。
-                self.world_birth[drone_idx, 2] = self.birth_positions[drone_idx, 2]
+                # Z 校准：用 EKF 参考海拔差异补偿各机 home 海拔不同。
+                # 各机 EKF 启动时气压计读数不同 → home 海拔(ref_alt)不同
+                # → 同一 local_z 对应不同实际海拔。
+                # 用 ref_alt 差作为 world_birth_z 偏移量，
+                # 使 MPC 世界坐标系中所有机共享同一海拔基准。
+                ref_0   = self._ref_alt[0]
+                ref_i   = self._ref_alt[drone_idx]
+                if ref_0 is not None and ref_i is not None:
+                    alt_offset = ref_0 - ref_i   # 正值 = 我比基准(home)低
+                    self.world_birth[drone_idx, 2] = (
+                        self.birth_positions[drone_idx, 2] + alt_offset
+                    )
+                    self.get_logger().info(
+                        f'[veh {drone_idx}] alt sync: '
+                        f'my_ref_alt={ref_i:.2f} ref_alt_0={ref_0:.2f} '
+                        f'offset={alt_offset:+.2f}m → '
+                        f'world_birth_z={self.world_birth[drone_idx,2]:.2f}'
+                    )
+                else:
+                    # ref_alt 不可用时回退到旧行为
+                    self.world_birth[drone_idx, 2] = self.birth_positions[drone_idx, 2]
+                    self.get_logger().warn(
+                        f'[veh {drone_idx}] ref_alt not available, '
+                        f'using birth_z (no alt sync)'
+                    )
                 self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
                 self._prev_z_reset[drone_idx] = msg.z_reset_counter
                 self._pos_calibrated[drone_idx] = True
