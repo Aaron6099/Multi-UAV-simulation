@@ -33,7 +33,7 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 > ⚠️ 当前为**速度控制模式**（自 commit 32759f6 / 3f7bbe8）。早期文档写的 position 闭环已废弃，**勿回退**（诊断文档已修复 bug#6）。
 
 - **控制模式**：`OffboardControlMode.velocity=True`（速度闭环）
-- **Setpoint**：`TrajectorySetpoint.velocity` = MPC 预测速度 + 位置误差 P 校正（Kp=1.0）；`.position=NaN`
+- **Setpoint**：`TrajectorySetpoint.velocity`；**XY = MPC 预测速度（已拆外层无阻尼 P 环，1c4bc5a，消除圆周震荡）**，Z 保留纯 P 保持高度；`.position=NaN`
 - **MPC 输出**：取 `x_pred[1, 3:6]`（预测速度）作为速度设定点基准
 - **高度**：纯 P 控制器保持 `target_alt`
 - **降级策略**：任何异常（解失败 / 偏差 >5m / NaN）→ `_hover_setpoint_world()` 悬停
@@ -47,6 +47,12 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 - `neighbour_timeout`: 2.0 s（邻居通信超时容忍）
 - `target_alt`: -5.0（NED，负值=向上，离地 5 米）
 - `d_safe`: 1.5 m（碰撞软约束距离）
+
+新增参数（2026-06-03，均在 `swarm_launch.py`/节点默认值）：
+- **标定硬化**（Tier1，30915f2）：`calib_max_origin_offset=2.0`（校准锁定前近原点门控；未收敛不硬锁，打红字 `calib STUCK` 守出生点）
+- **高度全员基准 re-sync**（Tier2，978ab9e）：`alt_resync_enable=True`/`alt_resync_rate=0.05`/`alt_ref_filter_alpha=0.05`/`alt_resync_max=3.0`（drone0 广播当前 ref_alt 到 `/swarm/alt_datum`，各机限速纠 `world_birth_z`，治 ref_alt 连续温漂）
+- **直线终点减速**（9f6bed6）：`line_decel=0.5` m/s²（梯形速度曲线缓停，防到点过冲）
+- **就绪门控**（af59b66）：`ready_gate_enable=True`/`ready_pos_err=0.5`/`ready_hold=2.0`/`ready_timeout=90.0`/`health_timeout=2.0`（leader 等全员进编队才开动，替代固定 `start_delay`）；`num_drones` 由 launch 传入
 
 ## 话题命名规则
 
@@ -90,6 +96,10 @@ ros2 launch mpc_control swarm_launch.py formation:=cross5
 ```
 
 > 完整分阶段启动命令（solo1→grid9）见 `/ubuntu-deploy` skill 或诊断文档「启动顺序」。
+
+**就绪门控**：leader 不再死等固定 `start_delay`，等全员进编队（pos_err<0.5m 保持 2s）才自动开始运动，日志 `formation ready — starting`，90s 超时兜底（`ready_gate_enable:=false` 退回固定延时）。
+
+**诊断与飞行记录**：`python3 diag_monitor.py --formation <队形>` 看实时面板；加 `--log` 每秒写 CSV，跑完 `python3 analyze_flight.py <csv> [--plot]` 出体检报告（pos_err/高度误差、最小间距+时刻、违规、solve、编队成型时间）。
 
 ## acados 编译缓存
 
