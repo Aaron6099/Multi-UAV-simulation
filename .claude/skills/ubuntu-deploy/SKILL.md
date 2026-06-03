@@ -13,9 +13,12 @@ disable-model-invocation: false
 
 ---
 
-**步骤 0：清理残留进程（每次启动前必须执行，用 -9 强制杀死避免 MPC 节点残留）**
+**步骤 0：清理残留进程（每次启动前必须执行；逐个明确进程名，pkill -9 -f 不会误伤 claude）**
 ```bash
-pkill -9 -f px4; pkill -9 -f gz; pkill -9 -f MicroXRCEAgent; pkill -9 -f ros2
+for p in px4 'gz sim' gzserver MicroXRCEAgent mpc_node leader_node swarm_launch 'ros2 launch'; do pkill -9 -f "$p"; done
+ros2 daemon stop 2>/dev/null; pkill -9 -f 'ros2-daemon'
+# 必做验证：下面这条应「零输出」才算清干净（gz sim server 会忽略信号、最易残留，需按 PID kill -9）
+ps aux | grep -E "px4|gz sim|gzserver|MicroXRCE|mpc_node|leader_node|swarm_launch|ros2-daemon" | grep -v grep
 ```
 
 **步骤 1：拉取最新代码**
@@ -29,10 +32,11 @@ git pull origin main
 chmod +x src/mpc_control/start_*_px4.sh   # 覆盖 1/2/3/5/9 全部脚本
 ```
 
-**步骤 3：清理 acados 缓存（修改了 mpc_node.py 后必须执行）**
+**步骤 3：清理 acados 缓存（仅当改了 MPC「OCP 结构」：horizon N / 状态维 / 约束 / 邻居数）**
 ```bash
 rm -rf /tmp/acados_di_mpc_*
 ```
+> ⚠️ 纯 Python / 参数改动（标定、leader、就绪门控、记录器等）**不必清缓存**，清了只是白等几分钟重编译。只有动了 acados OCP 结构才需清。
 
 **步骤 4：编译**
 ```bash
@@ -118,6 +122,16 @@ cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=grid9 [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
 # 终端5
 python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation grid9
+```
+
+---
+
+**就绪门控（af59b66）**：leader 不再死等固定 `start_delay`，而是**等所有机进入编队（pos_err<0.5m 保持 2s）才自动开始运动**，日志打 `formation ready — starting`；90s 超时兜底打红字。想退回旧固定延时：launch 加 `ready_gate_enable:=false`。
+
+**飞行记录（3e1b3e9）**：终端5 的 diag_monitor 加 `--log` 即每秒写 CSV；跑完用 analyze_flight 出体检报告：
+```bash
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <队形> --log
+python3 ~/ros2_control_mpc_ws/src/mpc_control/analyze_flight.py flight_<队形>_<时间戳>.csv [--plot]
 ```
 
 ---
