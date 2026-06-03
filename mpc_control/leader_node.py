@@ -58,6 +58,7 @@ class LeaderNode(Node):
         self.declare_parameter('radius',     10.0)      # circle 半径 m
         self.declare_parameter('publish_hz', 50.0)
         self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
+        self.declare_parameter('line_decel',   0.5)   # 直线终点前减速度 (m/s²)，平滑刹停防僚机过冲
         self.declare_parameter('start_delay', 30.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队（10s 太短，launch 默认同步为 30）
 
         self._mode   = str(self.get_parameter('mode').value)
@@ -71,6 +72,7 @@ class LeaderNode(Node):
         self._t  = 0.0
         self._dt = 1.0 / hz
         self._max_distance = float(self.get_parameter('max_distance').value)
+        self._line_decel   = max(1e-3, float(self.get_parameter('line_decel').value))
         self._start_delay = float(self.get_parameter('start_delay').value)
         self._initial_yaw = None   # 首次发布时记录
         self._current_yaw = 0.0    # 当前平滑后的 yaw（用于限幅）
@@ -170,13 +172,30 @@ class LeaderNode(Node):
                 # 对准阶段不移动
                 vx, vy = 0.0, 0.0
             else:
-                x = self._x0 + self._speed * (t_move - self._line_start_t)
-                y = self._y0
-                # 到达最大距离后悬停
-                dist = abs(x - self._x0)
-                if dist >= self._max_distance:
-                    x = self._x0 + self._max_distance * (1.0 if self._speed > 0 else -1.0)
-                    vx, vy = 0.0, 0.0
+                # 梯形速度曲线：巡航 → 终点前按 line_decel 平滑减速到 0。
+                # 旧版到点 vx 从 speed 直接跳到 0，速度阶跃致僚机过冲/来回弹几下。
+                tau   = t_move - self._line_start_t   # 平移已历时 (s)
+                spd   = abs(self._speed)
+                sgn   = 1.0 if self._speed >= 0 else -1.0
+                s_max = self._max_distance
+                a_dec = self._line_decel
+                d_brake = min(s_max, spd * spd / (2.0 * a_dec))          # 刹车距离
+                t_brake = max(0.0, (s_max - d_brake) / max(spd, 1e-6))   # 开始刹车时刻
+                t_decel = spd / a_dec                                    # 减速段时长
+                if tau <= t_brake:                    # 巡航
+                    d, v, a = spd * tau, spd, 0.0
+                elif tau <= t_brake + t_decel:        # 减速到 0
+                    td = tau - t_brake
+                    d = (s_max - d_brake) + spd * td - 0.5 * a_dec * td * td
+                    v = spd - a_dec * td
+                    a = -a_dec
+                else:                                 # 已停在终点
+                    d, v, a = s_max, 0.0, 0.0
+                d  = max(0.0, min(d, s_max))
+                x  = self._x0 + sgn * d
+                y  = self._y0
+                vx, vy = sgn * v, 0.0
+                ax, ay = sgn * a, 0.0
                 raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
                 yaw = self._apply_yaw_limits(raw_yaw)
 
