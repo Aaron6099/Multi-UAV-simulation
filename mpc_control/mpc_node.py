@@ -8,7 +8,7 @@ from rclpy.qos import (
     QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy,
 )
 
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, MultiArrayDimension
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, MultiArrayDimension, Float64
 from px4_msgs.msg import (
     VehicleLocalPosition,
     VehicleAttitude,
@@ -279,6 +279,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('calib_timeout_frames', 600)   # 兜底，防永不收敛死锁
         # EKF 收敛后静止于自身 local 原点，|local_xy| 必接近 0；仍几十米=GPS fix 前暂态，拒绝锁定
         self.declare_parameter('calib_max_origin_offset', 2.0)  # m，校准锁定时 |local_xy| 上限
+        # Tier2: ref_alt 连续温漂(不走 z_reset)→ 持续把 world_birth_z 拉回全员基准
+        self.declare_parameter('alt_resync_enable', True)
+        self.declare_parameter('alt_resync_rate', 0.05)       # m/s，world_birth_z 逼近限速(防 MPC z 跳)
+        self.declare_parameter('alt_ref_filter_alpha', 0.05)  # 当前 ref_alt 的 EMA 系数
+        self.declare_parameter('alt_resync_max', 3.0)         # m，单机 z 偏移安全上限
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -376,6 +381,13 @@ class MpcControllerNode(Node):
         self._prev_z_reset  = [0] * self.num_drones
         self._pos_calibrated = [False] * self.num_drones
         self._ref_alt = [None] * self.num_drones   # 各机 EKF 参考海拔 (ref_alt from local_pos)
+        # Tier2: 当前(滤波)ref_alt，每帧更新；与上面"标定时冻结的 _ref_alt"区分
+        self._ref_alt_now   = [None] * self.num_drones
+        self._datum_ref_alt = None   # drone0 广播的当前基准 ref_alt
+        self._alt_resync_enable = bool(self.get_parameter('alt_resync_enable').value)
+        self._alt_resync_rate   = float(self.get_parameter('alt_resync_rate').value)
+        self._alt_ref_alpha     = float(self.get_parameter('alt_ref_filter_alpha').value)
+        self._alt_resync_max    = float(self.get_parameter('alt_resync_max').value)
         # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
         self._valid_streak = [0] * self.num_drones
         # 校准滚动窗口：最近若干帧的 local (x,y,z)，用于稳定性门控
@@ -453,6 +465,19 @@ class MpcControllerNode(Node):
         self.create_subscription(
             Float64MultiArray, '/leader/state', self.on_leader_state, leader_qos,
         )
+        # Tier2: 全员高度基准 —— drone0 广播当前 ref_alt，各机据此 re-sync world_birth_z
+        datum_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST, depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.pub_alt_datum = (
+            self.create_publisher(Float64, '/swarm/alt_datum', datum_qos)
+            if self.drone_id == 0 else None
+        )
+        self.create_subscription(
+            Float64, '/swarm/alt_datum', self._on_alt_datum, datum_qos,
+        )
         self.pub_predicted = self.create_publisher(
             Float64MultiArray,
             mpc_topic_for_drone(self.drone_id, 'predicted_trajectory'), 10,
@@ -485,6 +510,15 @@ class MpcControllerNode(Node):
         def cb(msg):
             now = self.get_clock().now().nanoseconds * 1e-9
             ds = self.drone_states[drone_idx]
+
+            # Tier2: 持续跟踪当前(滤波)ref_alt（标定后 ref_alt 仍会温漂）
+            if math.isfinite(msg.ref_alt) and msg.ref_alt > 0.0:
+                if self._ref_alt_now[drone_idx] is None:
+                    self._ref_alt_now[drone_idx] = float(msg.ref_alt)
+                else:
+                    a = self._alt_ref_alpha
+                    self._ref_alt_now[drone_idx] = (
+                        (1.0 - a) * self._ref_alt_now[drone_idx] + a * float(msg.ref_alt))
 
             # --- detect EKF reset; update dynamic birth offset ---
             # Skip until first position calibrated world_birth — stale resets
@@ -676,6 +710,36 @@ class MpcControllerNode(Node):
     # =================================================================
     # control loop
     # =================================================================
+    def _on_alt_datum(self, msg):
+        self._datum_ref_alt = float(msg.data)
+
+    def _resync_world_birth_z(self, dt):
+        """Tier2: 把(已标定)机的 world_birth_z 限速拉向 birth_z + (datum - 当前ref_alt)。
+        ref_alt 连续温漂不触发 z_reset，:507 补不到；这里持续纠偏，且限速使 MPC 只看到
+        ≤alt_resync_rate 的 z 速度，不会跳。基准 = drone0 当前 ref_alt（广播给全员）。"""
+        # drone0 广播当前基准（己方标定后才发，避免广播 GPS-fix 前暂态）
+        if (self.drone_id == 0 and self._pos_calibrated[0]
+                and self._ref_alt_now[0] is not None):
+            self._datum_ref_alt = self._ref_alt_now[0]
+            if self.pub_alt_datum is not None:
+                m = Float64()
+                m.data = float(self._datum_ref_alt)
+                self.pub_alt_datum.publish(m)
+        if not self._alt_resync_enable or self._datum_ref_alt is None:
+            return
+        step = max(0.0, self._alt_resync_rate * dt)
+        for idx in [self.drone_id] + list(self.neighbours):
+            if not self._pos_calibrated[idx] or self._ref_alt_now[idx] is None:
+                continue
+            birth_z = float(self.birth_positions[idx, 2])
+            target  = birth_z + (self._datum_ref_alt - self._ref_alt_now[idx])
+            if abs(target - birth_z) > self._alt_resync_max:
+                continue   # ref_alt 异常大偏移，安全起见不跟
+            cur = float(self.world_birth[idx, 2])
+            err = target - cur
+            self.world_birth[idx, 2] = (
+                target if abs(err) <= step else cur + math.copysign(step, err))
+
     def control_loop(self):
         self.publish_offboard_mode()
         now_ros = self.get_clock().now()
@@ -683,6 +747,8 @@ class MpcControllerNode(Node):
         self.last_control_time = now_ros
         if dt <= 0.0 or dt > 0.5:
             dt = 1.0 / self.control_hz
+
+        self._resync_world_birth_z(dt)   # Tier2: 补偿 ref_alt 连续温漂
 
         # 使用当前姿态 yaw，避免起飞时强制转向正北
         yaw_hold = self.attitude_yaw if self.attitude_received else 0.0
