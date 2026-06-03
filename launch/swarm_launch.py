@@ -190,6 +190,7 @@ def _make_nodes(context, *args, **kwargs):
             'max_distance': LaunchConfiguration('max_distance'),
             'start_delay':  LaunchConfiguration('leader_start_delay'),
             'publish_hz':  50.0,
+            'num_drones':   cfg['num'],
         }],
     ))
 
