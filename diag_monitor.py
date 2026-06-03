@@ -151,7 +151,7 @@ class DroneData:
 
 
 class DiagMonitor(Node):
-    def __init__(self, formation: str):
+    def __init__(self, formation: str, log_path: str = None):
         super().__init__('diag_monitor')
 
         if formation not in FORMATION_CFG:
@@ -195,6 +195,24 @@ class DiagMonitor(Node):
         self.create_timer(1.0, self._print_status)
         self.get_logger().info(
             f'diag_monitor 已启动，监控队形={formation}，{self.num} 架无人机')
+
+        # ── 可选：结构化飞行记录 (CSV)，每秒一行，供 analyze_flight.py 复盘 ──
+        self._csv = None
+        if log_path:
+            import os
+            d = os.path.dirname(os.path.abspath(log_path))
+            if d:
+                os.makedirs(d, exist_ok=True)
+            self._csv = open(log_path, 'w', buffering=1)
+            hdr = ['t']
+            for i in range(self.num):
+                hdr += [f'd{i}_z', f'd{i}_zerr', f'd{i}_velxy', f'd{i}_arm',
+                        f'd{i}_nav', f'd{i}_mpc', f'd{i}_solve_ms',
+                        f'd{i}_fallback', f'd{i}_hover', f'd{i}_poserr']
+            hdr += ['min_spacing', 'formation_max_err', 'safety_violations',
+                    'total_fallbacks', 'max_solve_ms']
+            self._csv.write(','.join(hdr) + '\n')
+            self.get_logger().info(f'flight log → {log_path}')
 
     def _make_pos_cb(self, idx):
         def cb(msg):
@@ -387,6 +405,46 @@ class DiagMonitor(Node):
         lines.append('╚' + '═' * 70 + '╝')
 
         print('\n'.join(lines), flush=True)
+        self._log_row(elapsed)
+
+
+    def _log_row(self, elapsed):
+        if self._csv is None:
+            return
+        nan = float('nan')
+        row = [f'{elapsed:.1f}']
+        for d in self.drones:
+            if d.received:
+                z = float(d.pos[2])
+                zerr = z - self.cfg['target_alt']
+                velxy = float(np.linalg.norm(d.vel[:2]))
+            else:
+                z = zerr = velxy = nan
+            row += [f'{z:.3f}', f'{zerr:.3f}', f'{velxy:.3f}',
+                    str(d.arm_state), str(d.nav_state), str(d.mpc_status),
+                    f'{d.solve_ms:.3f}', str(d.fallback_count),
+                    str(int(d.hover_active)), f'{d.pos_err:.3f}']
+        min_sp = nan
+        if self.cfg['pairs']:
+            dmin = float('inf')
+            for (i, j) in self.cfg['pairs']:
+                di, dj = self.drones[i], self.drones[j]
+                if di.received and dj.received:
+                    dmin = min(dmin, float(np.linalg.norm(di.pos - dj.pos)))
+            if math.isfinite(dmin):
+                min_sp = dmin
+        max_ferr = nan
+        if self._leader_recv and all(d.received for d in self.drones):
+            offs = self.cfg['offsets_ned']
+            lxy = self._leader_pos[:2]
+            max_ferr = max(
+                float(np.linalg.norm(self.drones[i].pos[:2] - (lxy + offs[i, :2])))
+                for i in range(self.num))
+        total_fb  = sum(d.fallback_count for d in self.drones)
+        max_solve = max((d.solve_ms for d in self.drones if d.health_recv), default=0.0)
+        row += [f'{min_sp:.3f}', f'{max_ferr:.3f}', str(self._safety_violations),
+                str(total_fb), f'{max_solve:.3f}']
+        self._csv.write(','.join(row) + '\n')
 
 
 def main():
@@ -394,11 +452,19 @@ def main():
     parser.add_argument('--formation', '-f', default='pair2',
                         choices=list(FORMATION_CFG.keys()),
                         help='队形名称')
+    parser.add_argument('--log', nargs='?', const='', default=None,
+                        help='把每秒指标写入 CSV：给路径用之，省略路径则自动命名 '
+                             'flight_<formation>_<时间戳>.csv')
     args, ros_args = parser.parse_known_args()
+
+    log_path = None
+    if args.log is not None:
+        log_path = args.log or \
+            f'flight_{args.formation}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
 
     rclpy.init(args=ros_args)
     try:
-        node = DiagMonitor(args.formation)
+        node = DiagMonitor(args.formation, log_path)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
