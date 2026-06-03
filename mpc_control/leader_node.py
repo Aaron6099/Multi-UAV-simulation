@@ -21,7 +21,7 @@ yaw_mode 参数（运行时可切换）:
 import math
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Float32MultiArray
 
 # yaw 变化率上限 (rad/s)，防止机体抖动
 MAX_YAW_RATE = math.radians(45.0)  # 45°/s
@@ -60,6 +60,13 @@ class LeaderNode(Node):
         self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
         self.declare_parameter('line_decel',   0.5)   # 直线终点前减速度 (m/s²)，平滑刹停防僚机过冲
         self.declare_parameter('start_delay', 30.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队（10s 太短，launch 默认同步为 30）
+        # 闭环就绪门控：等各机进编队(pos_err<阈值)再开始运动，替代死等固定 start_delay
+        self.declare_parameter('num_drones',        1)
+        self.declare_parameter('ready_gate_enable', True)
+        self.declare_parameter('ready_pos_err',     0.5)   # m，进编队判定阈值
+        self.declare_parameter('ready_hold',        2.0)   # s，就绪需连续保持时长
+        self.declare_parameter('ready_timeout',     90.0)  # s，超时兜底：仍未就绪也开动(告警)
+        self.declare_parameter('health_timeout',    2.0)   # s，health 超此视为失联
 
         self._mode   = str(self.get_parameter('mode').value)
         self._x0     = float(self.get_parameter('start_x').value)
@@ -82,7 +89,26 @@ class LeaderNode(Node):
         self._line_start_t = 0.0    # 对准完成、开始平移时的运动时钟
         self._hold_logged = False   # 起飞等待提示只打一次
 
+        # 就绪门控状态
+        self._num_drones        = int(self.get_parameter('num_drones').value)
+        self._ready_gate_enable = bool(self.get_parameter('ready_gate_enable').value)
+        self._ready_pos_err     = float(self.get_parameter('ready_pos_err').value)
+        self._ready_hold        = float(self.get_parameter('ready_hold').value)
+        self._ready_timeout     = float(self.get_parameter('ready_timeout').value)
+        self._health_timeout    = float(self.get_parameter('health_timeout').value)
+        self._health_pos_err = [None] * max(1, self._num_drones)
+        self._health_stamp   = [None] * max(1, self._num_drones)
+        self._motion_started = False
+        self._motion_start_t = 0.0
+        self._ready_since    = None
+        self._timeout_warned = False
+
         self._pub = self.create_publisher(Float64MultiArray, '/leader/state', 10)
+        # 订阅各机 MPC health（pos_err=data[5]）用于就绪门控
+        for i in range(self._num_drones):
+            topic = '/mpc/health' if i == 0 else f'/px4_{i}/mpc/health'
+            self.create_subscription(
+                Float32MultiArray, topic, self._make_health_cb(i), 10)
         self.create_timer(self._dt, self._tick)
         self.get_logger().info(
             f'Leader ready: mode={self._mode}, yaw_mode={self.get_parameter("yaw_mode").value}, '
@@ -115,29 +141,78 @@ class LeaderNode(Node):
         self._current_yaw = smoothed
         return smoothed
 
+    def _make_health_cb(self, idx):
+        def cb(msg):
+            if len(msg.data) >= 6:
+                self._health_pos_err[idx] = float(msg.data[5])
+                self._health_stamp[idx] = self.get_clock().now().nanoseconds * 1e-9
+        return cb
+
+    def _all_formed_up(self):
+        """所有机 health 新鲜且 pos_err < 阈值 → 编队已组好。"""
+        if self._num_drones <= 0:
+            return False
+        now = self.get_clock().now().nanoseconds * 1e-9
+        for i in range(self._num_drones):
+            stamp = self._health_stamp[i]
+            err   = self._health_pos_err[i]
+            if stamp is None or (now - stamp) > self._health_timeout:
+                return False
+            if err is None or err > self._ready_pos_err:
+                return False
+        return True
+
+    def _should_start_motion(self, t):
+        # hover 不动、或门控关闭：退回旧的固定 start_delay 行为
+        if self._mode == 'hover' or not self._ready_gate_enable:
+            return t >= self._start_delay
+        # 闭环就绪：全员组好并连续保持 ready_hold
+        if self._all_formed_up():
+            if self._ready_since is None:
+                self._ready_since = t
+                self.get_logger().info(
+                    f'all drones formed up (pos_err < {self._ready_pos_err:.2f}m), '
+                    f'confirming for {self._ready_hold:.1f}s...')
+            elif t - self._ready_since >= self._ready_hold:
+                self.get_logger().info(
+                    f'formation ready — starting leader motion at t={t:.1f}s')
+                return True
+        else:
+            self._ready_since = None
+        # 超时兜底：太久没组好也开动，但大声告警（别静默卡住）
+        if t >= self._ready_timeout:
+            if not self._timeout_warned:
+                self.get_logger().error(
+                    f'readiness TIMEOUT at t={t:.1f}s — not all drones formed up; '
+                    'starting motion anyway, CHECK STRAGGLERS')
+                self._timeout_warned = True
+            return True
+        return False
+
     def _tick(self):
         t = self._t
         self._t += self._dt
         # 读取运行时参数（支持 ros2 param set 动态切换）
         self._mode = str(self.get_parameter('mode').value)
 
-        # 起飞等待：前 start_delay 秒 leader 在原点不动，给僚机 ARM+爬升+组队留时间，
-        # 避免它们从落后状态边爬边追导致 QP 失败/到点过冲。之后用 t_move 作运动时钟。
-        t_move = t - self._start_delay
-        if t_move < 0.0:
-            if not self._hold_logged:
-                self.get_logger().info(
-                    f'leader holding at start for {self._start_delay:.1f}s '
-                    f'(let drones arm/climb/form up)...')
-                self._hold_logged = True
-            x, y = self._x0, self._y0
-            vx, vy = 0.0, 0.0
-            ax, ay = 0.0, 0.0
-            yaw = self._apply_yaw_limits(self._compute_raw_yaw(x, y, vx, vy))
-            msg = Float64MultiArray()
-            msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw, ax, ay]
-            self._pub.publish(msg)
-            return
+        # 运动起始门控：等编队组好(各机 pos_err 小)再开始运动。
+        # 死等固定 start_delay 在 5/9 机会猜错(短了僚机边爬边追、长了干等)，
+        # 改为订阅各机 health.pos_err 的闭环就绪门控，带超时兜底。
+        if not self._motion_started:
+            if self._should_start_motion(t):
+                self._motion_started = True
+                self._motion_start_t = t
+            else:
+                x, y = self._x0, self._y0
+                vx, vy = 0.0, 0.0
+                ax, ay = 0.0, 0.0
+                yaw = self._apply_yaw_limits(self._compute_raw_yaw(x, y, vx, vy))
+                msg = Float64MultiArray()
+                msg.data = [float(t), x, y, self._alt, vx, vy, 0.0, yaw, ax, ay]
+                self._pub.publish(msg)
+                return
+
+        t_move = t - self._motion_start_t
 
         if self._mode == 'circle':
             omega = self._speed / max(self._radius, 0.1)
