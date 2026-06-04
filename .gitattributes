@@ -1,0 +1,10 @@
+# Python 和 Markdown：统一 LF
+*.py    text eol=lf
+*.md    text eol=lf
+
+# Shell 脚本：强制 LF（Ubuntu bash 不接受 CRLF）
+*.sh    text eol=lf
+
+# Launch 文件
+*.yaml  text eol=lf
+*.json  text eol=lf

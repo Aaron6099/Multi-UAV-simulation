@@ -1,39 +1,20 @@
-# ROS2 build artifacts
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ROS2 / colcon build artifacts
 build/
 install/
 log/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
+# acados generated code & cache
+acados_*/
+c_generated_code/
+*.json.bak
 
-# IDE
-.idea/
+# Editor / OS
 .vscode/
 *.swp
-*.swo
-
-# Compile artifacts
-compile_commands.json
-
-# Logs
-*.log
-logs/
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Misc
-*.bag
-
-# PX4 official packages (not part of this repo)
-src/px4_msgs/
-src/px4_ros_com/
-
-# PX4 official packages (clone separately)
-src/px4_msgs/
-src/px4_ros_com/
