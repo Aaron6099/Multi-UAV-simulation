@@ -106,6 +106,32 @@ FORMATION_CFG = {
     },
 }
 
+# ── 各机出生点（世界系 NED），与 swarm_launch.py 的 BIRTH_* / mpc_node 的 world_birth 一致 ──
+# diag 订阅的 vehicle_local_position 是各机相对【自身出生点】的本地系；要在统一世界系里
+# 比较机间距/队形偏差，必须加回出生点：world = local + birth。否则非原点出生的机（如 pair2
+# 的 drone1 出生在 (-3,0)）本地读数≈0 会被误判成与中心机重叠 → 假 CRIT、队形误差虚高。
+# ★ star5 出生在十字布局(BIRTH_5)、目标才是五边形(offsets)，故 birth ≠ offsets，不能用 offsets 顶替。
+_BIRTH5 = np.array([
+    [ 0.0,  0.0, 0.0],   # 0 中心
+    [ 0.0,  3.0, 0.0],   # 1 东
+    [ 0.0, -3.0, 0.0],   # 2 西
+    [ 3.0,  0.0, 0.0],   # 3 北
+    [-3.0,  0.0, 0.0],   # 4 南
+])
+BIRTH_NED = {
+    'solo1':  np.array([[0.0, 0.0, 0.0]]),
+    'pair2':  np.array([[0.0, 0.0, 0.0], [-3.0, 0.0, 0.0]]),
+    'trio3':  np.array([[3.0, 0.0, 0.0], [-1.5, 2.598, 0.0], [-1.5, -2.598, 0.0]]),
+    'cross5': _BIRTH5,
+    'star5':  _BIRTH5,   # ★ 出生=十字，目标=五边形；birth ≠ offsets
+    'grid9':  np.concatenate([_BIRTH5, np.array([
+        [ 3.0,  3.0, 0.0],   # 5 东北
+        [-3.0,  3.0, 0.0],   # 6 东南
+        [ 3.0, -3.0, 0.0],   # 7 西北
+        [-3.0, -3.0, 0.0],   # 8 西南
+    ])]),
+}
+
 # 安全间距告警阈值（比 d_safe 多 0.3m 余量，给提前预警）
 SPACING_WARN  = 1.8   # 黄色警告
 SPACING_CRIT  = 1.5   # 红色危险（等于 d_safe）
@@ -162,6 +188,7 @@ class DiagMonitor(Node):
         self.cfg = FORMATION_CFG[formation]
         self.formation = formation
         self.num = self.cfg['num']
+        self.birth = BIRTH_NED[formation]   # (num,3) 世界系出生点；world = local + birth
         self.drones = [DroneData() for _ in range(self.num)]
 
         # 统计
@@ -221,7 +248,9 @@ class DiagMonitor(Node):
     def _make_pos_cb(self, idx):
         def cb(msg):
             d = self.drones[idx]
-            d.pos = np.array([msg.x, msg.y, msg.z])
+            # local→world：加回出生点，与 mpc_node 的 ds.pos = local + world_birth 一致。
+            # 用静态出生点：稳态正确；EKF 偶发 xy reset 后会有短暂偏差，不影响报告稳态指标。
+            d.pos = np.array([msg.x, msg.y, msg.z]) + self.birth[idx]
             d.vel = np.array([msg.vx, msg.vy, msg.vz])
             d.received = True
             d.last_stamp = self.get_clock().now().nanoseconds * 1e-9
