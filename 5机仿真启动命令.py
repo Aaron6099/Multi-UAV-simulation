@@ -6,6 +6,8 @@
 
 pkill -f px4; pkill -f gz; pkill -f MicroXRCEAgent; pkill -f ros2
 
+mkdir -p ~/flights   # CSV 记录目录（首次建一次即可，供终端5 的 --log 使用）
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 更新代码（改完代码后执行）
@@ -39,8 +41,8 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=solo1
 
-终端5（诊断监控）：
-python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation solo1
+终端5（诊断监控 + 记录CSV）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation solo1 --log ~/flights/flight_solo1_hover.csv
 
 队形图（NED）：
   0(中心 0,0)
@@ -69,8 +71,8 @@ ros2 launch mpc_control swarm_launch.py formation:=pair2 leader_mode:=circle lea
 终端4（直线 1m/s）：
 ros2 launch mpc_control swarm_launch.py formation:=pair2 leader_mode:=line leader_speed:=1.0
 
-终端5（诊断监控）：
-python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation pair2
+终端5（诊断监控 + 记录CSV；<traj> 换成终端4 选的 hover/line/circle）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation pair2 --log ~/flights/flight_pair2_<traj>.csv
 
 队形图（NED，间距3m）：
   0(中心  0, 0)
@@ -100,8 +102,8 @@ ros2 launch mpc_control swarm_launch.py formation:=trio3 leader_mode:=circle lea
 终端4（直线 1m/s）：
 ros2 launch mpc_control swarm_launch.py formation:=trio3 leader_mode:=line leader_speed:=1.0
 
-终端5（诊断监控）：
-python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation trio3
+终端5（诊断监控 + 记录CSV；<traj> 换成终端4 选的 hover/line/circle）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation trio3 --log ~/flights/flight_trio3_<traj>.csv
 
 队形图（NED，等边三角形 外接圆R=3m 边长≈5.196m）：
        0(北 +3,0)
@@ -140,8 +142,8 @@ ros2 launch mpc_control swarm_launch.py formation:=star5
 终端4（5机星型 圆周）：
 ros2 launch mpc_control swarm_launch.py formation:=star5 leader_mode:=circle leader_speed:=1.5 leader_radius:=10.0
 
-终端5（诊断监控）：
-python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation cross5
+终端5（诊断监控 + 记录CSV；star5 时把两处 cross5 换成 star5，<traj> 换 hover/line/circle）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation cross5 --log ~/flights/flight_cross5_<traj>.csv
 
 队形图 cross5（间距3m）：
         3(北)
@@ -171,8 +173,8 @@ ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=circle lea
 终端4（直线）：
 ros2 launch mpc_control swarm_launch.py formation:=grid9 leader_mode:=line leader_speed:=1.0
 
-终端5（诊断监控）：
-python3 ~/ros2_control_mpc_ws/src/mpc_control/mpc_control/diag_monitor.py --formation grid9
+终端5（诊断监控 + 记录CSV；<traj> 换成终端4 选的 hover/line/circle）：
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation grid9 --log ~/flights/flight_grid9_<traj>.csv
 
 队形图 grid9（间距3m）：
   7(西北) 3(北) 5(东北)
