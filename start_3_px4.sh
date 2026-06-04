@@ -74,15 +74,4 @@ for i in 0 1 2; do
     fi
 done
 
-echo ""
-echo "=== trio3: 3 架 PX4 实例已启动 ==="
-echo "编队布局 (NED，等边三角形 R=3m):"
-echo "  drone 0: (+3.000,  0.000) 北顶"
-echo "  drone 1: (-1.500, +2.598) 东南"
-echo "  drone 2: (-1.500, -2.598) 西南"
-echo "  最小边长 ≈ 5.196 m"
-echo ""
-echo "下一步:"
-echo "  终端3: MicroXRCEAgent udp4 -p 8888"
-echo "  终端4: cd ~/ros2_control_mpc_ws && source install/setup.bash"
-echo "          ros2 launch mpc_control swarm_launch.py formation:=trio3"
+echo "=== trio3: 3 架 PX4 已启动 ==="

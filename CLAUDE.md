@@ -99,7 +99,9 @@ ros2 launch mpc_control swarm_launch.py formation:=cross5
 
 **就绪门控**：leader 不再死等固定 `start_delay`，等全员进编队（pos_err<0.5m 保持 2s）才自动开始运动，日志 `formation ready — starting`，90s 超时兜底（`ready_gate_enable:=false` 退回固定延时）。
 
-**诊断与飞行记录**：`python3 diag_monitor.py --formation <队形>` 看实时面板；加 `--log` 每秒写 CSV，跑完 `python3 analyze_flight.py <csv> [--plot]` 出体检报告（pos_err/高度误差、最小间距+时刻、违规、solve、编队成型时间）。
+**诊断与飞行记录**：`python3 diag_monitor.py --formation <队形>` 看实时面板；加 `--log` 每秒写 CSV，跑完 `python3 analyze_flight.py <csv> [--plot]` 出体检报告（pos_err/高度误差、最小间距+时刻、违规、solve、编队成型时间）。CSV 含各机 `x,y`(世界系 NED) 与 `leader_x,y,vx,vy`，支持俯视轨迹图（纯增列、向后兼容）。
+
+**阶段性报告与出图**：`report/` 下有 `阶段性报告.md`（原理/架构/设计/结果，中英双语）、`RUN_PLAN_仿真运行清单.md`（逐场景命令）、`make_figures.py`（读 CSV 出面板图/轨迹图/多 run 对比/`metrics_table.md`）。出图：`py report/make_figures.py report/data/<csv> --out report/figures`。
 
 ## acados 编译缓存
 

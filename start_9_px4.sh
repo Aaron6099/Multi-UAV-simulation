@@ -94,10 +94,4 @@ for i in $(seq 0 8); do
     fi
 done
 
-echo ""
-echo "All 9 PX4 instances launched."
-echo ""
-echo "Next steps (in separate terminals):"
-echo "  Terminal A:  MicroXRCEAgent udp4 -p 8888"
-echo "  Terminal B:  cd ~/ros2_multi_offboard_ws && source install/setup.bash"
-echo "               ros2 launch <package> swarm_launch.py"
+echo "=== grid9: 9 架 PX4 已启动 ==="
