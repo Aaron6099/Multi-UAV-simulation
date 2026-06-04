@@ -25,6 +25,7 @@ ps aux | grep -E "px4|gz sim|gzserver|MicroXRCE|mpc_node|leader_node|swarm_launc
 ```bash
 cd ~/ros2_control_mpc_ws
 git pull origin main
+mkdir -p ~/flights          # CSV 记录目录（首次建一次即可，供终端5 的 --log 使用）
 ```
 
 **步骤 2：赋予启动脚本执行权限（首次拉取后执行一次即可）**
@@ -61,7 +62,7 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=solo1
 # 终端5（诊断监控）
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation solo1
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation solo1 --log ~/flights/flight_solo1_<traj>.csv
 ```
 
 **pair2（双机，Phase 1）**
@@ -76,7 +77,7 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=pair2 [leader_mode:=hover]
 # 终端5
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation pair2
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation pair2 --log ~/flights/flight_pair2_<traj>.csv
 ```
 
 **trio3（三机，Phase 2）**
@@ -91,7 +92,7 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=trio3 [leader_mode:=hover]
 # 终端5
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation trio3
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation trio3 --log ~/flights/flight_trio3_<traj>.csv
 ```
 
 **cross5 / star5（5机，Phase 3）**
@@ -106,7 +107,7 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=<cross5|star5> [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
 # 终端5
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <cross5|star5>
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <cross5|star5> --log ~/flights/flight_<cross5|star5>_<traj>.csv
 ```
 
 **grid9（9机，Phase 3）**
@@ -121,18 +122,18 @@ MicroXRCEAgent udp4 -p 8888
 cd ~/ros2_control_mpc_ws && source install/setup.bash
 ros2 launch mpc_control swarm_launch.py formation:=grid9 [leader_mode:=<模式>] [leader_speed:=1.5] [leader_radius:=10.0]
 # 终端5
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation grid9
+python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation grid9 --log ~/flights/flight_grid9_<traj>.csv
 ```
 
 ---
 
 **就绪门控（af59b66）**：leader 不再死等固定 `start_delay`，而是**等所有机进入编队（pos_err<0.5m 保持 2s）才自动开始运动**，日志打 `formation ready — starting`；90s 超时兜底打红字。想退回旧固定延时：launch 加 `ready_gate_enable:=false`。
 
-**飞行记录（3e1b3e9）**：终端5 的 diag_monitor 加 `--log` 即每秒写 CSV；跑完用 analyze_flight 出体检报告：
+**飞行记录（3e1b3e9）**：上面终端5 已带 `--log`，每秒写一行 CSV 到 `~/flights/`（`<traj>` 换成所选 hover/line/circle）。跑完用 analyze_flight 出体检报告：
 ```bash
-python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation <队形> --log
-python3 ~/ros2_control_mpc_ws/src/mpc_control/analyze_flight.py flight_<队形>_<时间戳>.csv [--plot]
+python3 ~/ros2_control_mpc_ws/src/mpc_control/analyze_flight.py ~/flights/flight_<队形>_<traj>.csv [--plot]
 ```
+> 完整逐场景「控制器+记录」命令见 `report/CORE_run_commands.md`（CORE S1–S8）与 `report/RUN_PLAN_仿真运行清单.md`。
 
 ---
 

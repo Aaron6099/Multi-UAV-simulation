@@ -13,15 +13,12 @@ mkdir -p ~/flights   # CSV 记录目录（首次建一次即可，供终端5 的
 更新代码（改完代码后执行）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-cd ~/ros2_control_mpc_ws/src/mpc_control && git pull origin main
-cp mpc_node.py     mpc_control/mpc_node.py
-cp leader_node.py  mpc_control/leader_node.py
-cp swarm_launch.py launch/swarm_launch.py
-cp diag_monitor.py mpc_control/diag_monitor.py
+cd ~/ros2_control_mpc_ws/src/mpc_control && git pull origin main   # 仓库即 src/mpc_control，git pull 直接更新模块，无需 cp
 cd ~/ros2_control_mpc_ws
-rm -rf /tmp/acados_di_mpc_*
+rm -rf /tmp/acados_di_mpc_*        # 仅在改了 MPC OCP 结构(horizon/状态/邻居数/约束)时才需清缓存
 colcon build --packages-select mpc_control
 source install/setup.bash
+# 注：diag_monitor.py 直接 python3 运行，git pull 即生效，无需 colcon build
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -121,7 +118,7 @@ python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation trio3 
 gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
 
 终端2：
-START_DELAY=10 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_5_px4.sh
 
 终端3：
 MicroXRCEAgent udp4 -p 8888
@@ -157,7 +154,7 @@ python3 ~/ros2_control_mpc_ws/src/mpc_control/diag_monitor.py --formation cross5
   3(西南 -1.76,-2.43)
   4(西北 -2.85,0.93)
 
-注意：5机模式下 drone 5~8 停在地面不参与编队，属正常现象。
+注意：5机用 start_5_px4.sh 正好启动5架、全部参与编队；9机方阵见下一节（用 start_9_px4.sh）。
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
