@@ -836,7 +836,7 @@ max_speed = 3.0  # 从 5.0 降低到 3.0
 gz sim -r ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
 
 # 终端2 - PX4 实例
-START_DELAY=3 bash ~/ros2_multi_offboard_ws/src/flocking_swarm/start_9_px4.sh
+START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_5_px4.sh
 
 # 终端3 - DDS Agent
 MicroXRCEAgent udp4 -p 8888
