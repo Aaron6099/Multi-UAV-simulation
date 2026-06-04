@@ -79,17 +79,4 @@ for i in 0 1 2 3 4; do
     fi
 done
 
-echo ""
-echo "=== cross5/star5: 5 架 PX4 实例已启动 ==="
-echo "编队布局 (NED):"
-echo "  drone 0: (  0,  0) 中心"
-echo "  drone 1: (  0, +3) 东"
-echo "  drone 2: (  0, -3) 西"
-echo "  drone 3: ( +3,  0) 北"
-echo "  drone 4: ( -3,  0) 南"
-echo ""
-echo "下一步:"
-echo "  终端3: MicroXRCEAgent udp4 -p 8888"
-echo "  终端4: cd ~/ros2_control_mpc_ws && source install/setup.bash"
-echo "          ros2 launch mpc_control swarm_launch.py formation:=cross5"
-echo "       或: ros2 launch mpc_control swarm_launch.py formation:=star5"
+echo "=== cross5/star5: 5 架 PX4 已启动 ==="

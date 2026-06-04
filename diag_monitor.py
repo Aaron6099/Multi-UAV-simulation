@@ -206,11 +206,15 @@ class DiagMonitor(Node):
             self._csv = open(log_path, 'w', buffering=1)
             hdr = ['t']
             for i in range(self.num):
-                hdr += [f'd{i}_z', f'd{i}_zerr', f'd{i}_velxy', f'd{i}_arm',
+                # d{i}_x / d{i}_y 为世界系 NED 位置(北/东)，用于俯视轨迹图；
+                # 追加在每机分组最前，纯增列、向后兼容 analyze_flight.py。
+                hdr += [f'd{i}_x', f'd{i}_y', f'd{i}_z', f'd{i}_zerr',
+                        f'd{i}_velxy', f'd{i}_arm',
                         f'd{i}_nav', f'd{i}_mpc', f'd{i}_solve_ms',
                         f'd{i}_fallback', f'd{i}_hover', f'd{i}_poserr']
             hdr += ['min_spacing', 'formation_max_err', 'safety_violations',
-                    'total_fallbacks', 'max_solve_ms']
+                    'total_fallbacks', 'max_solve_ms',
+                    'leader_x', 'leader_y', 'leader_vx', 'leader_vy']
             self._csv.write(','.join(hdr) + '\n')
             self.get_logger().info(f'flight log → {log_path}')
 
@@ -415,12 +419,15 @@ class DiagMonitor(Node):
         row = [f'{elapsed:.1f}']
         for d in self.drones:
             if d.received:
+                x = float(d.pos[0])
+                y = float(d.pos[1])
                 z = float(d.pos[2])
                 zerr = z - self.cfg['target_alt']
                 velxy = float(np.linalg.norm(d.vel[:2]))
             else:
-                z = zerr = velxy = nan
-            row += [f'{z:.3f}', f'{zerr:.3f}', f'{velxy:.3f}',
+                x = y = z = zerr = velxy = nan
+            row += [f'{x:.3f}', f'{y:.3f}', f'{z:.3f}', f'{zerr:.3f}',
+                    f'{velxy:.3f}',
                     str(d.arm_state), str(d.nav_state), str(d.mpc_status),
                     f'{d.solve_ms:.3f}', str(d.fallback_count),
                     str(int(d.hover_active)), f'{d.pos_err:.3f}']
@@ -442,8 +449,14 @@ class DiagMonitor(Node):
                 for i in range(self.num))
         total_fb  = sum(d.fallback_count for d in self.drones)
         max_solve = max((d.solve_ms for d in self.drones if d.health_recv), default=0.0)
+        if self._leader_recv:
+            lx, ly   = float(self._leader_pos[0]), float(self._leader_pos[1])
+            lvx, lvy = float(self._leader_vel[0]), float(self._leader_vel[1])
+        else:
+            lx = ly = lvx = lvy = nan
         row += [f'{min_sp:.3f}', f'{max_ferr:.3f}', str(self._safety_violations),
-                str(total_fb), f'{max_solve:.3f}']
+                str(total_fb), f'{max_solve:.3f}',
+                f'{lx:.3f}', f'{ly:.3f}', f'{lvx:.3f}', f'{lvy:.3f}']
         self._csv.write(','.join(row) + '\n')
 
 

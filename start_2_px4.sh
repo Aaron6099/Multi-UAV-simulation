@@ -71,13 +71,4 @@ for i in 0 1; do
     fi
 done
 
-echo ""
-echo "=== pair2: 2 架 PX4 实例已启动 ==="
-echo "编队布局 (NED):"
-echo "  drone 0: (  0,  0) 中心"
-echo "  drone 1: ( -3,  0) 南 3 m"
-echo ""
-echo "下一步:"
-echo "  终端3: MicroXRCEAgent udp4 -p 8888"
-echo "  终端4: cd ~/ros2_control_mpc_ws && source install/setup.bash"
-echo "          ros2 launch mpc_control swarm_launch.py formation:=pair2"
+echo "=== pair2: 2 架 PX4 已启动 ==="

@@ -55,9 +55,4 @@ else
     echo "  後台运行，日志: $LOG_DIR/px4_0.log (PID $!)"
 fi
 
-echo ""
-echo "=== solo1: 1 架 PX4 实例已启动 ==="
-echo "下一步 (分别在新终端中):"
-echo "  终端3: MicroXRCEAgent udp4 -p 8888"
-echo "  终端4: cd ~/ros2_control_mpc_ws && source install/setup.bash"
-echo "          ros2 launch mpc_control swarm_launch.py formation:=solo1"
+echo "=== solo1: 1 架 PX4 已启动 ==="
