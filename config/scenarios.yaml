@@ -143,7 +143,15 @@ scenarios:
     birth_override: [[3.3, 0.5, 0], [-1.2, 2.8, 0], [-1.8, -2.3, 0]]
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
 
-  S20_trio3_wide:                           # 队形放大 R 3→5(3机)
+  S20_pair2_line_d10:                       # 双机直线 近目标 max_distance=10
+    formation: pair2
+    leader: {mode: line, speed: 0.5, max_distance: 10.0}
+
+  S21_pair2_line_d30:                       # 双机直线 远目标 max_distance=30
+    formation: pair2
+    leader: {mode: line, speed: 0.5, max_distance: 30.0}
+
+  S22_trio3_wide:                           # 三机间距加宽 3→5 m（offsets_scale=5/3≈1.6667）
     formation: trio3
     offsets_scale: 1.6667
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
