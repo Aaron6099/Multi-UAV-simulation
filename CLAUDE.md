@@ -87,8 +87,8 @@ START_DELAY=5 bash ~/ros2_control_mpc_ws/src/mpc_control/start_5_px4.sh
 MicroXRCEAgent udp4 -p 8888
 
 # 5. 终端4：编译并启动（从 GitHub 拉取新代码后执行）
+cd ~/ros2_control_mpc_ws/src/mpc_control && git pull origin main  # 实际代码在 src/mpc_control
 cd ~/ros2_control_mpc_ws
-git pull origin main           # 仓库 clone 为 src/mpc_control，直接更新模块（无需 cp 拷贝）
 rm -rf /tmp/acados_di_mpc_*     # 改了 MPC 结构时必须清缓存
 colcon build --packages-select mpc_control
 source install/setup.bash
