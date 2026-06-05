@@ -127,19 +127,22 @@ scenarios:
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
     faults: {comms_delay_ms: 200, comms_dropout: 0.2}
 
-  # ── 2机/3机 多维扫描（出生点/间距需命名场景；速度/目标距离用 key:=value 覆盖即可）──
-  S17_pair2_perturbed:                      # 出生点扰动(2机)：从打乱起点收敛
+  # ── pair2 / trio3 扰动 + 速度应力 ──────────────────────────────────────────
+  S17_pair2_perturbed:                      # 双机出生扰动
     formation: pair2
-    birth_override: [[1.2, 0.8, 0], [-2.4, -1.0, 0]]
+    birth_override: [[0.5, 0.3, 0], [-2.7, -0.4, 0]]
     leader: {mode: line, speed: 0.5, max_distance: 20.0}
-  S18_pair2_wide:                           # 间距加宽 3→5 m(2机)
+
+  S18_pair2_wide:                           # 双机间距加宽 3→5 m
     formation: pair2
     offsets_scale: 1.6667
     leader: {mode: line, speed: 0.5, max_distance: 20.0}
-  S19_trio3_perturbed:                      # 出生点扰动(3机)：从打乱起点收敛
+
+  S19_trio3_perturbed:                      # 三机出生扰动
     formation: trio3
-    birth_override: [[2.5, 1.2, 0], [-2.0, 1.8, 0], [-0.3, -2.6, 0]]
+    birth_override: [[3.3, 0.5, 0], [-1.2, 2.8, 0], [-1.8, -2.3, 0]]
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+
   S20_trio3_wide:                           # 队形放大 R 3→5(3机)
     formation: trio3
     offsets_scale: 1.6667
