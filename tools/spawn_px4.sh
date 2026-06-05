@@ -1,0 +1,75 @@
+#!/bin/bash
+# spawn_px4.sh — 按 config/scenarios.yaml 的出生点启动 N 个 PX4 SITL 实例。
+#
+# 出生 POSES 由 tools/gen_spawn.py 从 scenarios.yaml 生成（单一真值源；与
+# swarm_launch.py 读同一份 birth，杜绝 BIRTH_* ↔ POSES 漂移）。
+#
+# 用法:
+#   FORMATION=cross5 bash tools/spawn_px4.sh               # 用队形标准出生点
+#   SCENARIO=S11_cross5_perturbed bash tools/spawn_px4.sh  # 用工况(可扰动出生)
+#   （start_N_px4.sh 是设好 FORMATION 的薄包装）
+#
+# Env: PX4_DIR(默认 ~/PX4-Autopilot-1.14), START_DELAY(默认 5),
+#      FORMATION(默认 cross5) | SCENARIO(设了则优先)
+set -e
+
+PX4_DIR="${PX4_DIR:-$HOME/PX4-Autopilot-1.14}"
+START_DELAY="${START_DELAY:-5}"
+FORMATION="${FORMATION:-cross5}"
+
+if [ ! -d "$PX4_DIR" ]; then
+    echo "ERROR: PX4_DIR=$PX4_DIR 不存在"
+    exit 1
+fi
+
+export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
+cd "$PX4_DIR"
+
+# ── 出生 POSES：从 scenarios.yaml 生成（gen_spawn 把警告打到 stderr，stdout 仅 POSE 串）──
+GEN="$(dirname "$(readlink -f "$0")")/gen_spawn.py"
+if [ -n "${SCENARIO:-}" ]; then SEL=(--scenario "$SCENARIO"); TAG="$SCENARIO"
+else                            SEL=(--formation "$FORMATION"); TAG="$FORMATION"; fi
+mapfile -t POSES < <(python3 "$GEN" "${SEL[@]}" --format lines)
+if [ "${#POSES[@]}" -eq 0 ]; then
+    echo "ERROR: gen_spawn 未产出 POSES（检查 $GEN 与 config/scenarios.yaml）"
+    exit 1
+fi
+echo "=== 出生点: $TAG (${#POSES[@]} 架)，来自 config/scenarios.yaml ==="
+
+for i in "${!POSES[@]}"; do
+    POSE="${POSES[$i]}"
+    echo "启动 drone $i | ENU pose: $POSE"
+
+    if command -v gnome-terminal &> /dev/null; then
+        gnome-terminal --tab --title="px4_${i}_${TAG}" -- bash -c "
+            export GZ_SIM_RESOURCE_PATH='$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds'
+            export PX4_GZ_STANDALONE=1
+            export PX4_SYS_AUTOSTART=4001
+            export PX4_GZ_MODEL=x500
+            export PX4_GZ_MODEL_POSE='$POSE'
+            cd '$PX4_DIR'
+            ./build/px4_sitl_default/bin/px4 -i $i
+            exec bash
+        "
+    else
+        LOG_DIR="$HOME/px4_logs"
+        mkdir -p "$LOG_DIR"
+        (
+            export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds"
+            export PX4_GZ_STANDALONE=1
+            export PX4_SYS_AUTOSTART=4001
+            export PX4_GZ_MODEL=x500
+            export PX4_GZ_MODEL_POSE="$POSE"
+            cd "$PX4_DIR"
+            ./build/px4_sitl_default/bin/px4 -i $i > "$LOG_DIR/px4_$i.log" 2>&1
+        ) &
+        echo "  后台，日志: $LOG_DIR/px4_$i.log (PID $!)"
+    fi
+
+    if [ "$i" -lt "$(( ${#POSES[@]} - 1 ))" ]; then
+        echo "  等待 ${START_DELAY}s ..."
+        sleep "$START_DELAY"
+    fi
+done
+
+echo "=== $TAG: ${#POSES[@]} 架 PX4 已启动 ==="

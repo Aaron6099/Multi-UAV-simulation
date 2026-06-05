@@ -1,0 +1,136 @@
+# ============================================================================
+# scenarios.yaml — 多工况稳定性测试的【单一真值源】 / single source of truth
+# ----------------------------------------------------------------------------
+# 谁读它:
+#   tools/gen_spawn.py            → 生成 start_N_px4.sh 的 PX4 出生 POSES(ENU)
+#   launch/swarm_launch.py (P1后续) → BIRTH_*/OFFSETS_*/NBR_*/COMMON 由此注入
+#   tools/verdict.py (P3)          → 用 thresholds 自动判 PASS/FAIL
+#
+# 坐标: birth / offsets 一律 世界系 NED = [North, East, Down]（Down 通常 0）。
+#       Gazebo ENU 换算只在 gen_spawn 里做一次: ENU=(East,North)=(NED[1],NED[0])。
+#
+# ⚠️ 改了 formations.*.birth 后，务必重生成 start_N 出生点，别手改脚本：
+#       py tools/gen_spawn.py --formation cross5         # 看/贴 POSES
+#       py tools/gen_spawn.py --validate                 # 校验与现有脚本一致
+# ============================================================================
+
+# ── 公共参数（= swarm_launch.py 的 COMMON）；scenario.limits 可覆盖安全相关项 ──
+defaults:
+  target_alt:               -5.0    # NED，负=向上，-5 → 离地 5 m
+  max_speed:                 3.0
+  max_climb:                 1.5
+  max_accel:                 4.0
+  control_hz:               50.0
+  neighbour_timeout:         2.0
+  startup_zero_vel_frames:   100
+  calib_settle_frames:        25
+  mpc_horizon:                30
+  mpc_dt:                   0.05
+  q_pos:                     4.0
+  q_vel:                     2.0
+  r_acc:                     0.1
+  q_pos_terminal_scale:      2.0
+  d_safe:                    1.5
+  w_collision:             200.0
+  w_formation:               0.5
+  acados_build_dir: /tmp/acados_di_mpc
+
+# ── 队形几何：标准出生点 birth(NED) + 邻居 + 队形偏移 offsets ──────────────────
+# 取代 swarm_launch.py 里硬编码的 BIRTH_*/OFFSETS_*/NBR_*。offsets 省略 = 同 birth。
+formations:
+  solo1:
+    birth:      [[0, 0, 0]]
+    neighbours: [[0]]
+
+  pair2:                                    # 前后纵列，间距 3 m
+    birth:      [[0, 0, 0], [-3, 0, 0]]
+    neighbours: [[1], [0]]
+
+  trio3:                                    # 等边三角形，外接圆 R=3，边长≈5.196
+    birth:      [[3, 0, 0], [-1.5, 2.598, 0], [-1.5, -2.598, 0]]
+    neighbours: [[1, 2], [0, 2], [0, 1]]
+
+  cross5:                                   # 十字：出生即队形
+    birth:      [[0, 0, 0], [0, 3, 0], [0, -3, 0], [3, 0, 0], [-3, 0, 0]]
+    neighbours: [[1, 2, 3, 4], [0], [0], [0], [0]]
+
+  star5:                                    # 出生=十字(同 cross5)，队形=五边形
+    birth:      [[0, 0, 0], [0, 3, 0], [0, -3, 0], [3, 0, 0], [-3, 0, 0]]
+    offsets:    [[3, 0, 0], [0.927, 2.853, 0], [-2.427, 1.763, 0],
+                 [-2.427, -1.763, 0], [0.927, -2.853, 0]]
+    neighbours: [[1, 4], [0, 2], [1, 3], [2, 4], [3, 0]]
+
+  grid9:                                    # 3×3 方阵：出生即队形
+    birth:      [[0, 0, 0], [0, 3, 0], [0, -3, 0], [3, 0, 0], [-3, 0, 0],
+                 [3, 3, 0], [-3, 3, 0], [3, -3, 0], [-3, -3, 0]]
+    neighbours: [[1, 2, 3, 4], [0, 5, 6], [0, 7, 8], [0, 5, 7], [0, 6, 8],
+                 [1, 3], [1, 4], [2, 3], [2, 4]]
+
+# ── 命名测试工况：选 formation + 覆盖旋钮。对应报告 RUN_PLAN 的 S1–S14 ─────────
+# 可覆盖项：
+#   leader:  {mode: hover|line|circle, speed, radius, max_distance, yaw_mode: fixed|center|tangent}
+#   limits:  {max_speed, max_accel, d_safe, neighbour_timeout}   # 保守限幅 + 阈值调参
+#   faults:  {kill_drone, kill_at_s, comms_delay_ms, comms_dropout}  # 故障注入(P2)
+#   birth_override: [[N,E,D],...]    # 扰动出生(需 gen_spawn 重生成 spawn)
+#   offsets_scale:  <float>          # 整体缩放队形(改间距/尺度)
+#   duration_s:     <int>            # 建议运行时长
+#   thresholds:     {...}            # 覆盖默认判定阈值
+scenarios:
+  # ── CORE（建议必跑，支撑报告主体）──
+  S1_solo1_line:    {formation: solo1,  leader: {mode: line,   speed: 1.0, max_distance: 20.0, yaw_mode: tangent}}
+  S2_pair2_line:    {formation: pair2,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
+  S3_trio3_circle:  {formation: trio3,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
+  S4_cross5_line:   {formation: cross5, leader: {mode: line,   speed: 1.0, max_distance: 20.0}}
+  S5_cross5_circle: {formation: cross5, leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
+  S6_cross5_hover:  {formation: cross5, leader: {mode: hover}}
+  S7_grid9_line:    {formation: grid9,  leader: {mode: line,   speed: 1.0, max_distance: 20.0},
+                     thresholds: {solve_ms: 15.0}}
+  S8_grid9_circle:  {formation: grid9,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
+                     thresholds: {solve_ms: 15.0}}
+
+  # ── EXT（扫自变量，加强稳定性论证）──
+  S9_star5_line:    {formation: star5,  leader: {mode: line,   speed: 1.0, max_distance: 20.0}}
+
+  S10_cross5_line_fast:                     # 速度应力：看限幅边界
+    formation: cross5
+    leader: {mode: line, speed: 2.5, max_distance: 30.0}
+
+  S11_cross5_perturbed:                     # 出生点扰动：从打乱初值收敛(两两已 > d_safe)
+    formation: cross5
+    birth_override: [[1.0, 0.8, 0], [0.5, 3.4, 0], [-0.7, -2.6, 0],
+                     [3.5, -0.6, 0], [-2.8, 0.9, 0]]
+    leader: {mode: line, speed: 1.0, max_distance: 20.0}
+
+  S12_cross5_wide:                          # 加宽间距 3→5 m
+    formation: cross5
+    offsets_scale: 1.6667
+    leader: {mode: line, speed: 1.0, max_distance: 20.0}
+
+  S13_cross5_circle_10min:                  # 长时漂移
+    formation: cross5
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    duration_s: 600
+
+  # ── 降级三件套（故障注入 / 保守限幅 / 阈值调参）──
+  S14_cross5_killnode:                      # 故障注入：稳定后杀 drone1，看降级悬停+间距
+    formation: cross5
+    leader: {mode: line, speed: 1.0, max_distance: 20.0}
+    faults: {kill_drone: 1, kill_at_s: 30}
+
+  S15_cross5_conservative:                  # 保守限幅：逼近真机参数
+    formation: cross5
+    leader: {mode: line, speed: 1.0, max_distance: 20.0}
+    limits: {max_speed: 1.5, max_accel: 2.0, d_safe: 2.5}
+
+  S16_cross5_commsdrop:                     # 通信劣化注入：邻居预测延时+丢包
+    formation: cross5
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    faults: {comms_delay_ms: 200, comms_dropout: 0.2}
+
+# ── 默认判定阈值（verdict.py 用；scenario.thresholds 可逐项覆盖）──────────────
+thresholds:
+  min_spacing:        1.8     # 全程最小间距 > 1.8 m（< d_safe=1.5 为危险）
+  pos_err:            0.5     # 成型后各机跟踪误差 < 0.5 m
+  solve_ms:          12.0     # 单帧最大求解 < 12 ms（grid9 放宽 15）
+  safety_violations:    0     # 间距 < 1.5 m 累计帧 = 0
+  total_fallbacks:      0     # 降级悬停累计 = 0
