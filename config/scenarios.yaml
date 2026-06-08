@@ -79,7 +79,16 @@ scenarios:
   # ── CORE（建议必跑，支撑报告主体）──
   S1_solo1_line:    {formation: solo1,  leader: {mode: line,   speed: 1.0, max_distance: 20.0, yaw_mode: tangent}}
   S2_pair2_line:    {formation: pair2,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
+  S2_pair2_hover:   {formation: pair2,  leader: {mode: hover}}
   S3_trio3_circle:  {formation: trio3,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
+  S3_trio3_circle_wf01: {formation: trio3, leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
+                          limits: {w_formation: 0.1}}
+  S3_trio3_circle_wf01_v2: {formation: trio3, leader: {mode: circle, speed: 2.0, radius: 10.0, yaw_mode: center},
+                              limits: {w_formation: 0.1}}
+  S3_trio3_circle_wf005: {formation: trio3, leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
+                           limits: {w_formation: 0.05}}
+  S3_trio3_circle_wf005_v2: {formation: trio3, leader: {mode: circle, speed: 2.0, radius: 10.0, yaw_mode: center},
+                               limits: {w_formation: 0.05}}
   S4_cross5_line:   {formation: cross5, leader: {mode: line,   speed: 1.0, max_distance: 20.0}}
   S5_cross5_circle: {formation: cross5, leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
   S6_cross5_hover:  {formation: cross5, leader: {mode: hover}}
@@ -138,10 +147,16 @@ scenarios:
     offsets_scale: 1.6667
     leader: {mode: line, speed: 0.5, max_distance: 20.0}
 
-  S19_trio3_perturbed:                      # 三机出生扰动
+  S19_trio3_perturbed:                      # 三机出生扰动（平衡：追得上+不弹射+归队）
     formation: trio3
     birth_override: [[3.3, 0.5, 0], [-1.2, 2.8, 0], [-1.8, -2.3, 0]]
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    # 参数因果(实测):
+    #   max_accel 4(默认)→追得上但近距弹射; 2.5→不弹射但d2掉队30m滞后 ⇒ 3.5折中
+    #   w_collision 80→强斥力弹射; 60→d2仍掉队 ⇒ 50温和避障
+    #   d_safe 2.0 提前避让(保留,防靠到1m触发强斥力)
+    #   w_formation 0.1→拉不回d2 ⇒ 0.2 加强归队
+    limits: {d_safe: 2.0, max_accel: 3.5, w_collision: 50.0, w_formation: 0.2}
 
   S20_pair2_line_d10:                       # 双机直线 近目标 max_distance=10
     formation: pair2
