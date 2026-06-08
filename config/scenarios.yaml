@@ -33,6 +33,12 @@ defaults:
   d_safe:                    1.5
   w_collision:             200.0
   w_formation:               0.5
+  # SITL 三机同一 Gazebo 地面：关闭 alt 跨机校准。各机 EKF 的 ref_alt(GPS海拔基准)
+  # 差 1-1.5m 纯属仿真噪声，非真实高度差；开着会让各机飞到不同物理高度(高度参差)。
+  # 关闭后各机 world_birth_z=birth_z=0，各自控到离地 target_alt，三机同高。
+  # （真机各机 home 海拔可能真不同，部署时再设 true）
+  alt_sync_enable:          false
+  alt_resync_enable:        false
   acados_build_dir: /tmp/acados_di_mpc
 
 # ── 队形几何：标准出生点 birth(NED) + 邻居 + 队形偏移 offsets ──────────────────
@@ -147,16 +153,16 @@ scenarios:
     offsets_scale: 1.6667
     leader: {mode: line, speed: 0.5, max_distance: 20.0}
 
-  S19_trio3_perturbed:                      # 三机出生扰动（平衡：追得上+不弹射+归队）
+  S19_trio3_perturbed:                      # 三机出生扰动（先成型再走圆周）
     formation: trio3
     birth_override: [[3.3, 0.5, 0], [-1.2, 2.8, 0], [-1.8, -2.3, 0]]
-    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
-    # 参数因果(实测):
-    #   max_accel 4(默认)→追得上但近距弹射; 2.5→不弹射但d2掉队30m滞后 ⇒ 3.5折中
-    #   w_collision 80→强斥力弹射; 60→d2仍掉队 ⇒ 50温和避障
-    #   d_safe 2.0 提前避让(保留,防靠到1m触发强斥力)
-    #   w_formation 0.1→拉不回d2 ⇒ 0.2 加强归队
-    limits: {d_safe: 2.0, max_accel: 3.5, w_collision: 50.0, w_formation: 0.2}
+    # ready_hold 20s: 三机静止悬停下把队形畸变收敛到位(pos_err<0.3)再开圆周，
+    # 消除入轨期"边追边成型"的畸变(实测入轨期畸变峰值8.8m)。
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center,
+             ready_hold: 20.0, ready_pos_err: 0.3}
+    # w_formation 0.05: 圆周跟踪最优(越小越圆; 0.2会向心离心震荡)。失控由
+    # EKF reset cap(mpc_node)根治。
+    limits: {w_formation: 0.05}
 
   S20_pair2_line_d10:                       # 双机直线 近目标 max_distance=10
     formation: pair2

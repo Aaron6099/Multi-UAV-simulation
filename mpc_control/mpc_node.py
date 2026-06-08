@@ -280,6 +280,7 @@ class MpcControllerNode(Node):
         # EKF 收敛后静止于自身 local 原点，|local_xy| 必接近 0；仍几十米=GPS fix 前暂态，拒绝锁定
         self.declare_parameter('calib_max_origin_offset', 2.0)  # m，校准锁定时 |local_xy| 上限
         # Tier2: ref_alt 连续温漂(不走 z_reset)→ 持续把 world_birth_z 拉回全员基准
+        self.declare_parameter('alt_sync_enable', True)       # 初始用 ref_alt 差校准 world_birth_z(真机各机home海拔不同需要)；SITL 三机同地面应关(ref_alt 差是EKF噪声,补偿会让各机飞到不同物理高度)
         self.declare_parameter('alt_resync_enable', True)
         self.declare_parameter('alt_resync_rate', 0.05)       # m/s，world_birth_z 逼近限速(防 MPC z 跳)
         self.declare_parameter('alt_ref_filter_alpha', 0.05)  # 当前 ref_alt 的 EMA 系数
@@ -384,6 +385,7 @@ class MpcControllerNode(Node):
         # Tier2: 当前(滤波)ref_alt，每帧更新；与上面"标定时冻结的 _ref_alt"区分
         self._ref_alt_now   = [None] * self.num_drones
         self._datum_ref_alt = None   # drone0 广播的当前基准 ref_alt
+        self._alt_sync_enable = bool(self.get_parameter('alt_sync_enable').value)
         self._alt_resync_enable = bool(self.get_parameter('alt_resync_enable').value)
         self._alt_resync_rate   = float(self.get_parameter('alt_resync_rate').value)
         self._alt_ref_alpha     = float(self.get_parameter('alt_ref_filter_alpha').value)
@@ -616,7 +618,7 @@ class MpcControllerNode(Node):
                 # 使 MPC 世界坐标系中所有机共享同一海拔基准。
                 ref_0   = self._ref_alt[0]
                 ref_i   = self._ref_alt[drone_idx]
-                if ref_0 is not None and ref_i is not None:
+                if self._alt_sync_enable and ref_0 is not None and ref_i is not None:
                     alt_offset = ref_0 - ref_i   # 正值 = 我比基准(home)低
                     self.world_birth[drone_idx, 2] = (
                         self.birth_positions[drone_idx, 2] + alt_offset
@@ -628,11 +630,11 @@ class MpcControllerNode(Node):
                         f'world_birth_z={self.world_birth[drone_idx,2]:.2f}'
                     )
                 else:
-                    # ref_alt 不可用时回退到旧行为
+                    # alt_sync 关闭(SITL同地面)或 ref_alt 不可用 → 用 birth_z，各机各控离地 target_alt
                     self.world_birth[drone_idx, 2] = self.birth_positions[drone_idx, 2]
-                    self.get_logger().warn(
-                        f'[veh {drone_idx}] ref_alt not available, '
-                        f'using birth_z (no alt sync)'
+                    self.get_logger().info(
+                        f'[veh {drone_idx}] alt_sync {"disabled" if not self._alt_sync_enable else "no ref_alt"}, '
+                        f'using birth_z={self.birth_positions[drone_idx,2]:.2f}'
                     )
                 self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
                 self._prev_z_reset[drone_idx] = msg.z_reset_counter

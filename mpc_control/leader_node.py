@@ -59,6 +59,7 @@ class LeaderNode(Node):
         self.declare_parameter('publish_hz', 50.0)
         self.declare_parameter('max_distance', 20.0)  # 直线模式最大飞行距离 (m)，到达后悬停
         self.declare_parameter('line_decel',   0.5)   # 直线终点前减速度 (m/s²)，平滑刹停防僚机过冲
+        self.declare_parameter('circle_ramp_time', 5.0)  # 圆周缓启动 (s)：角速度 0→满速线性加速，消除从静止切入圆周的速度阶跃(防僚机震荡)；0=关闭
         self.declare_parameter('start_delay', 30.0)   # 起飞等待 (s)：leader 先原地不动，等僚机 ARM+爬升+组队（10s 太短，launch 默认同步为 30）
         # 闭环就绪门控：等各机进编队(pos_err<阈值)再开始运动，替代死等固定 start_delay
         self.declare_parameter('num_drones',        1)
@@ -80,6 +81,7 @@ class LeaderNode(Node):
         self._dt = 1.0 / hz
         self._max_distance = float(self.get_parameter('max_distance').value)
         self._line_decel   = max(1e-3, float(self.get_parameter('line_decel').value))
+        self._circle_ramp_time = float(self.get_parameter('circle_ramp_time').value)
         self._start_delay = float(self.get_parameter('start_delay').value)
         self._initial_yaw = None   # 首次发布时记录
         self._current_yaw = 0.0    # 当前平滑后的 yaw（用于限幅）
@@ -215,18 +217,30 @@ class LeaderNode(Node):
         t_move = t - self._motion_start_t
 
         if self._mode == 'circle':
-            omega = self._speed / max(self._radius, 0.1)
+            omega_max = self._speed / max(self._radius, 0.1)
             # 圆心在出生点正西，使 t_move=0 时 leader 正好在出生点 (x0,y0)
             # 避免从 hold 切到 circle 时的 10m 位置阶跃
             cx = self._x0 - self._radius
             cy = self._y0
-            x   =  cx + self._radius * math.cos(omega * t_move)
-            y   =  cy + self._radius * math.sin(omega * t_move)
-            vx  = -self._radius * omega * math.sin(omega * t_move)
-            vy  =  self._radius * omega * math.cos(omega * t_move)
-            # 向心加速度：a = -ω²r，方向指向圆心
-            ax  = -omega * vy   # = -ω² * radius * cos(ωt)
-            ay  =  omega * vx   # = -ω² * radius * sin(ωt)
+            # 缓启动：角速度 ω(τ) 前 T_ramp 秒从 0 线性增到 ω_max，相位 φ=∫ω dτ。
+            # 消除速度阶跃 → 僚机平滑切入圆周，不被突然的满速前馈甩出。
+            T = self._circle_ramp_time
+            tau = t_move
+            if T > 1e-3 and tau < T:
+                omega     = omega_max * (tau / T)
+                phi       = omega_max * tau * tau / (2.0 * T)
+                omega_dot = omega_max / T
+            else:
+                omega     = omega_max
+                phi       = omega_max * (tau - (0.5 * T if T > 1e-3 else 0.0))
+                omega_dot = 0.0
+            x   = cx + self._radius * math.cos(phi)
+            y   = cy + self._radius * math.sin(phi)
+            vx  = -self._radius * omega * math.sin(phi)
+            vy  =  self._radius * omega * math.cos(phi)
+            # 加速度 = 向心(-ω²r) + 切向(r·ω̇)；切向项在 ramp 期补偿角加速度
+            ax  = -self._radius * (omega_dot * math.sin(phi) + omega * omega * math.cos(phi))
+            ay  =  self._radius * (omega_dot * math.cos(phi) - omega * omega * math.sin(phi))
             raw_yaw = self._compute_raw_yaw(x, y, vx, vy)
             yaw = self._apply_yaw_limits(raw_yaw)
 

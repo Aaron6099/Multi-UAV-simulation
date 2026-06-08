@@ -103,6 +103,10 @@ def _make_nodes(context, *args, **kwargs):
         'start_delay':  resolve('leader_start_delay', 'start_delay', float),
         'publish_hz':   50.0,
         'num_drones':   num,
+        # 就绪门控阈值：scenario.leader 可覆盖（默认同 leader_node）。
+        # 加大 ready_hold 可让僚机在静止悬停下把队形畸变收敛到位再开动（先成型再走）。
+        'ready_hold':    float(scen_leader.get('ready_hold', 2.0)),
+        'ready_pos_err': float(scen_leader.get('ready_pos_err', 0.5)),
     }
 
     nodes = [Node(
