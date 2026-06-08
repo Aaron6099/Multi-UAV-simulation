@@ -523,16 +523,26 @@ class MpcControllerNode(Node):
             # --- detect EKF reset; update dynamic birth offset ---
             # Skip until first position calibrated world_birth — stale resets
             # from before MPC startup would corrupt the offset.
+            _EKF_RESET_CAP = 5.0  # m — ignore implausibly large SITL startup glitches
             if self._pos_calibrated[drone_idx]:
                 if msg.xy_reset_counter > self._prev_xy_reset[drone_idx]:
-                    self.world_birth[drone_idx, 0] -= float(msg.delta_xy[0])
-                    self.world_birth[drone_idx, 1] -= float(msg.delta_xy[1])
-                    self.get_logger().warn(
-                        f'[veh {drone_idx}] xy reset #{msg.xy_reset_counter}, '
-                        f'delta=({msg.delta_xy[0]:+.2f}, {msg.delta_xy[1]:+.2f}); '
-                        f'world_birth -> ({self.world_birth[drone_idx,0]:+.2f}, '
-                        f'{self.world_birth[drone_idx,1]:+.2f})'
-                    )
+                    dx, dy = float(msg.delta_xy[0]), float(msg.delta_xy[1])
+                    reset_mag = math.hypot(dx, dy)
+                    if reset_mag > _EKF_RESET_CAP:
+                        self.get_logger().error(
+                            f'[veh {drone_idx}] xy reset #{msg.xy_reset_counter} '
+                            f'IGNORED (mag={reset_mag:.1f}m > cap={_EKF_RESET_CAP}m); '
+                            f'world_birth unchanged'
+                        )
+                    else:
+                        self.world_birth[drone_idx, 0] -= dx
+                        self.world_birth[drone_idx, 1] -= dy
+                        self.get_logger().warn(
+                            f'[veh {drone_idx}] xy reset #{msg.xy_reset_counter}, '
+                            f'delta=({dx:+.2f}, {dy:+.2f}); '
+                            f'world_birth -> ({self.world_birth[drone_idx,0]:+.2f}, '
+                            f'{self.world_birth[drone_idx,1]:+.2f})'
+                        )
                     self._prev_xy_reset[drone_idx] = msg.xy_reset_counter
                 # Z reset：补偿 world_birth_z。
                 # z_reset 改变 local_z 与 GPS 海拔的对应关系。由于 world_birth_z
