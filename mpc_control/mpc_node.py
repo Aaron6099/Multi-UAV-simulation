@@ -854,10 +854,8 @@ class MpcControllerNode(Node):
             return
 
         # ── Velocity control mode ──
-        # MPC outputs acceleration u0; integrate to get velocity command.
-        # Position P-controller for z-axis (altitude hold).
-        u0 = x_pred[0, 0:3]  # actually this is x_pred[0] state, need u0 from solver
-        # Use predicted velocity at k=1 as base, plus position error correction
+        # Use predicted velocity at k=1 as velocity setpoint base.
+        # z-axis: pure P-controller for altitude hold (decoupled from XY).
         pred_vel = x_pred[1, 3:6].copy()
 
         # Position error → velocity correction (P-controller)
