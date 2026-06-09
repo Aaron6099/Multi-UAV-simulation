@@ -1,0 +1,11 @@
+controller,type,P,I,D,N,sat_lo,sat_hi
+"Forward position (x 位置)",PD,1,0,0.741,1.14,-Inf,Inf
+"Lateral  position (y 位置)",PD,1,0,0.21,1.18,-0.4,0.4
+"Forward velocity (x 速度)",PD,10,0,0.1,20,-Inf,Inf
+"Lateral  velocity (y 速度)",PD,10,0,0.1,20,-Inf,Inf
+"Vel→angle (x 方向)",PID,3,0.2,0,100,-Inf,Inf
+"Vel→angle (y 方向)",PID,3,0.2,0,100,-Inf,Inf
+"Roll  姿态",PID,6,1,0.2,100,-Inf,Inf
+"Pitch 姿态",PID,5,1,0.2,100,-Inf,Inf
+"Yaw   姿态",PID,3,0.059,12.4,6.75,-Inf,Inf
+"Altitude z 高度",PID,6,1,0.2,100,-Inf,Inf
