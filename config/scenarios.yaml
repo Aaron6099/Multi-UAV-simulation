@@ -87,6 +87,7 @@ scenarios:
   S2_pair2_line:    {formation: pair2,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
   S2_pair2_hover:   {formation: pair2,  leader: {mode: hover}}
   S3_trio3_circle:  {formation: trio3,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
+  S3_trio3_circle_v2: {formation: trio3, leader: {mode: circle, speed: 2.0, radius: 10.0, yaw_mode: center}}  # 速度应力(wf=默认0.5)，扫描 2x3 网格的角
   S3_trio3_circle_wf01: {formation: trio3, leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
                           limits: {w_formation: 0.1}}
   S3_trio3_circle_wf01_v2: {formation: trio3, leader: {mode: circle, speed: 2.0, radius: 10.0, yaw_mode: center},
