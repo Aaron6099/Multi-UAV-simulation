@@ -93,6 +93,22 @@ scn(3).vz = -1.0 * (t < 5); scn(3).t = t;
 scn(3).png = 'simulink_trio3_circle.png';
 scn(3).title = 'Simulink PID trio3 Circle R=10 m, v=1.5 m/s';
 
+% S-D: trio3 circle 扰动出生(S19 birth_override) + ±5% 质量离散
+%      PID 编队层无位置反馈 → 预期 form_err 不收敛（对照 MPC S19 可收敛）
+T = 65; t = (0:dtc:T)';
+BIRTH_TRIO3_PERT = [ 3.3   0.5    0;
+                    -1.2   2.8    0;
+                    -1.8  -2.3    0];
+tc = max(t - 10, 0);
+scn(4).name = 'trio3-circle-perturbed'; scn(4).births = BIRTH_TRIO3_PERT; scn(4).T = T;
+scn(4).nominal = BIRTH_TRIO3;             % 队形误差对标【标准】三角形
+scn(4).mass = Mass * [1.05 0.95 1.00];    % 质量离散
+scn(4).vx = -v * sin(om * tc) .* (t >= 10);
+scn(4).vy =  v * cos(om * tc) .* (t >= 10);
+scn(4).vz = -1.0 * (t < 5); scn(4).t = t;
+scn(4).png = 'simulink_trio3_circle_perturbed.png';
+scn(4).title = 'Simulink PID trio3 Circle — perturbed birth + ±5% mass (no formation feedback)';
+
 D_SAFE = 1.5; FORM_THR = 0.5;
 
 %% ── 3. 逐场景逐机仿真 ────────────────────────────────────────────────────
@@ -115,7 +131,12 @@ for s = 1:numel(scn)
         simIn = simIn.setVariable('vx_ts', vx_ts);
         simIn = simIn.setVariable('vy_ts', vy_ts);
         simIn = simIn.setVariable('vz_ts', vz_ts);
-        fprintf('  drone%d @[%g %g %g] ... ', d-1, birth);
+        if isfield(sc, 'mass') && ~isempty(sc.mass)
+            simIn = simIn.setVariable('Mass', sc.mass(d));
+            fprintf('  drone%d @[%g %g %g] Mass=%.2fkg ... ', d-1, birth, sc.mass(d));
+        else
+            fprintf('  drone%d @[%g %g %g] ... ', d-1, birth);
+        end
         tic; out = sim(simIn); el = toc;
         Xe_sig = out.logsout.getElement('Xe');
         XeAll{d} = Xe_sig.Values.Data;      % Nx3 NED
@@ -128,10 +149,15 @@ for s = 1:numel(scn)
     tAll = tAll(1:L);
     for d = 1:n, XeAll{d} = XeAll{d}(1:L, :); end
 
-    % 队形误差: 相对 drone0 的偏差 vs 标称偏移
+    % 队形误差: 相对 drone0 的偏差 vs 标称偏移（扰动场景对标 nominal 队形）
+    if isfield(sc, 'nominal') && ~isempty(sc.nominal)
+        ref_births = sc.nominal;
+    else
+        ref_births = sc.births;
+    end
     form_err = zeros(L, 1);
     for d = 2:n
-        nominal = sc.births(d, :) - sc.births(1, :);
+        nominal = ref_births(d, :) - ref_births(1, :);
         rel = XeAll{d} - XeAll{1};
         e = sqrt(sum((rel(:, 1:2) - nominal(1:2)).^2, 2));   % 水平
         form_err = max(form_err, e);
