@@ -21,7 +21,9 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument, ExecuteProcess, LogInfo, OpaqueFunction, TimerAction,
+)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -80,6 +82,13 @@ def _make_nodes(context, *args, **kwargs):
     for k, v in scen.get('limits', {}).items():
         common[k] = float(v)
 
+    # ── P2 故障注入：scenario.faults（S14 杀节点 / S16 通信劣化）──────────────
+    faults = scen.get('faults', {})
+    if 'comms_delay_ms' in faults:
+        common['comms_delay_ms'] = float(faults['comms_delay_ms'])
+    if 'comms_dropout' in faults:
+        common['comms_dropout'] = float(faults['comms_dropout'])
+
     # ── leader 参数：显式启动参数(非空) > scenario.leader > 内置默认 ──────────
     scen_leader = scen.get('leader', {})
 
@@ -126,6 +135,20 @@ def _make_nodes(context, *args, **kwargs):
             name=f'mpc_node_{drone_id}', namespace=f'px4_{drone_id}',
             output='screen', parameters=[p],
         ))
+
+    # ── S14 杀节点：kill_at_s 秒后 pkill 目标 mpc_node 进程（模拟整机失联）────
+    if 'kill_drone' in faults:
+        kill_id = int(faults['kill_drone'])
+        kill_at = float(faults.get('kill_at_s', 30.0))
+        if not 0 <= kill_id < num:
+            raise ValueError(f'faults.kill_drone={kill_id} 越界 (num_drones={num})')
+        nodes.append(TimerAction(period=kill_at, actions=[
+            LogInfo(msg=f'[P2 FAULT INJECTION] t={kill_at:.0f}s — '
+                        f'killing mpc_node_{kill_id} (drone {kill_id} 整机失联模拟)'),
+            ExecuteProcess(
+                cmd=['pkill', '-f', f'__node:=mpc_node_{kill_id}'],
+                output='screen'),
+        ]))
     return nodes
 
 

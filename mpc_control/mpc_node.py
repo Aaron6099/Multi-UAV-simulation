@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 import os
+import random
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -296,6 +297,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('w_collision', 200.0)
         self.declare_parameter('w_formation', 0.5)
         self.declare_parameter('acados_build_dir', '/tmp/acados_di_mpc')
+        # P2 故障注入：邻居预测轨迹的通信劣化（S16；0=关闭）。
+        # delay 注入后走既有时间对齐路径（latency 平移），dropout 直接丢弃消息——
+        # 超过 neighbour_timeout 自动落入"常值外推/队形推断"降级，与真失联同路径。
+        self.declare_parameter('comms_delay_ms', 0.0)
+        self.declare_parameter('comms_dropout', 0.0)
 
         self.drone_id   = int(self.get_parameter('drone_id').value)
         self.num_drones = int(self.get_parameter('num_drones').value)
@@ -352,6 +358,12 @@ class MpcControllerNode(Node):
         w_coll   = float(self.get_parameter('w_collision').value)
         w_form   = float(self.get_parameter('w_formation').value)
         build_dir = str(self.get_parameter('acados_build_dir').value)
+        self.comms_delay_s = max(0.0, float(self.get_parameter('comms_delay_ms').value)) * 1e-3
+        self.comms_dropout = min(1.0, max(0.0, float(self.get_parameter('comms_dropout').value)))
+        if self.comms_delay_s > 0.0 or self.comms_dropout > 0.0:
+            self.get_logger().warn(
+                f'[P2 FAULT INJECTION] comms_delay={self.comms_delay_s*1e3:.0f}ms '
+                f'dropout={self.comms_dropout:.0%} — 仅用于降级测试，真机部署必须为 0')
 
         # State
         self.drone_states = [DroneState() for _ in range(self.num_drones)]
@@ -366,6 +378,7 @@ class MpcControllerNode(Node):
         self._startup_counter = 0
         self.peer_predictions = {}
         self.peer_prediction_stamps = {}   # drone_id -> float (seconds)
+        self._pred_delay_buf = {}          # P2 注入延迟: drone_id -> [(arrival_t, traj), ...]
         self._dbg_counter = 0
 
         self.last_valid_yaw = 0.0
@@ -714,10 +727,29 @@ class MpcControllerNode(Node):
             data = np.asarray(msg.data, dtype=float)
             if data.size % 3 != 0 or data.size == 0:
                 return
+            # P2 注入: 丢包 — 直接丢弃本条预测（超时后走既有失联降级路径）
+            if self.comms_dropout > 0.0 and random.random() < self.comms_dropout:
+                return
             traj = data.reshape(-1, 3)
-            self.peer_predictions[drone_idx] = traj
-            self.peer_prediction_stamps[drone_idx] = self.get_clock().now().nanoseconds * 1e-9
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if self.comms_delay_s > 0.0:
+                # P2 注入: 延迟 — 入缓冲，到期才可见；stamp 记原始到达时刻，
+                # 使既有 latency 时间对齐自然吸收注入延迟
+                self._pred_delay_buf.setdefault(drone_idx, []).append((now, traj))
+            else:
+                self.peer_predictions[drone_idx] = traj
+                self.peer_prediction_stamps[drone_idx] = now
         return cb
+
+    def _drain_pred_delay_buf(self, now):
+        """P2: 把注入延迟已到期的邻居预测放行到 peer_predictions。"""
+        if self.comms_delay_s <= 0.0:
+            return
+        for j, buf in self._pred_delay_buf.items():
+            while buf and (now - buf[0][0]) >= self.comms_delay_s:
+                arrival_t, traj = buf.pop(0)
+                self.peer_predictions[j] = traj
+                self.peer_prediction_stamps[j] = arrival_t
 
     # =================================================================
     # control loop
@@ -940,6 +972,7 @@ class MpcControllerNode(Node):
         if not self.neighbours:
             return None
         now = self.get_clock().now().nanoseconds * 1e-9
+        self._drain_pred_delay_buf(now)
         N1 = self.N + 1
         out = np.zeros((len(self.neighbours), N1, 3))
         for idx, j in enumerate(self.neighbours):

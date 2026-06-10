@@ -182,6 +182,30 @@ scenarios:
     offsets_scale: 1.6667
     leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
 
+  # ── 真机部署门槛（pair2/trio3 的 P2 三件套，对应 S14–S16 的 cross5 版）──────
+  S23_pair2_killnode:                       # 双机杀一机：剩余机应稳定悬停不受扰
+    formation: pair2
+    leader: {mode: line, speed: 0.5, max_distance: 20.0}
+    faults: {kill_drone: 1, kill_at_s: 30}
+
+  S24_trio3_killnode:                       # 三机圆周中杀一机：余两机维持跟踪+间距
+    formation: trio3
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center,
+             ready_hold: 20.0, ready_pos_err: 0.3}
+    faults: {kill_drone: 1, kill_at_s: 45}
+
+  S25_trio3_commsdrop:                      # 三机通信劣化：200ms 延迟 + 20% 丢包
+    formation: trio3
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center,
+             ready_hold: 20.0, ready_pos_err: 0.3}
+    faults: {comms_delay_ms: 200, comms_dropout: 0.2}
+
+  S26_trio3_conservative:                   # 三机保守限幅：逼近真机参数
+    formation: trio3
+    leader: {mode: circle, speed: 1.0, radius: 10.0, yaw_mode: center,
+             ready_hold: 20.0, ready_pos_err: 0.3}
+    limits: {max_speed: 1.5, max_accel: 2.0, d_safe: 2.5}
+
 # ── 默认判定阈值（verdict.py 用；scenario.thresholds 可逐项覆盖）──────────────
 thresholds:
   min_spacing:        1.8     # 全程最小间距 > 1.8 m（< d_safe=1.5 为危险）
