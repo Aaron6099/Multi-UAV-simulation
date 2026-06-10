@@ -21,3 +21,7 @@ Thumbs.db
 
 # 个人/工作文档（保留在本地桌面，不入库）
 *.docx
+
+# Simulink build cache
+report/simulink_formation/slprj/
+*.slxc
