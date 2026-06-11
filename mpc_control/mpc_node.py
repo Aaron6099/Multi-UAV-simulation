@@ -302,6 +302,10 @@ class MpcControllerNode(Node):
         # 超过 neighbour_timeout 自动落入"常值外推/队形推断"降级，与真失联同路径。
         self.declare_parameter('comms_delay_ms', 0.0)
         self.declare_parameter('comms_dropout', 0.0)
+        # 真机安全门控：false = 节点不发 ARM/OFFBOARD 指令，只持续发 setpoint 流并
+        # 等待飞手用 RC 解锁+切 OFFBOARD（PX4 要求切换前 setpoint 流已 >2Hz，满足）。
+        # SITL 无 RC，保持默认 true 自动解锁。
+        self.declare_parameter('auto_arm_enable', True)
 
         self.drone_id   = int(self.get_parameter('drone_id').value)
         self.num_drones = int(self.get_parameter('num_drones').value)
@@ -360,6 +364,10 @@ class MpcControllerNode(Node):
         build_dir = str(self.get_parameter('acados_build_dir').value)
         self.comms_delay_s = max(0.0, float(self.get_parameter('comms_delay_ms').value)) * 1e-3
         self.comms_dropout = min(1.0, max(0.0, float(self.get_parameter('comms_dropout').value)))
+        self.auto_arm_enable = bool(self.get_parameter('auto_arm_enable').value)
+        if not self.auto_arm_enable:
+            self.get_logger().warn(
+                f'drone {self.drone_id}: auto_arm DISABLED — 等待飞手 RC 解锁并切 OFFBOARD')
         if self.comms_delay_s > 0.0 or self.comms_dropout > 0.0:
             self.get_logger().warn(
                 f'[P2 FAULT INJECTION] comms_delay={self.comms_delay_s*1e3:.0f}ms '
@@ -689,15 +697,17 @@ class MpcControllerNode(Node):
         self.pub_vehicle_cmd.publish(msg)
 
     def _arm_and_engage_offboard(self):
-        """Retry ARM + OFFBOARD until confirmed. Call every ~100 frames (2 s at 50 Hz)."""
+        """Retry ARM + OFFBOARD until confirmed. Call every ~100 frames (2 s at 50 Hz).
+        auto_arm_enable=false（真机）时不发指令，只被动等待飞手 RC 操作后的状态确认。"""
         if self._arm_offboard_confirmed:
             return
-        if self._nav_state != 14:
-            self._send_vehicle_command(
-                VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
-        if self._arming_state != 2:
-            self._send_vehicle_command(
-                VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
+        if self.auto_arm_enable:
+            if self._nav_state != 14:
+                self._send_vehicle_command(
+                    VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
+            if self._arming_state != 2:
+                self._send_vehicle_command(
+                    VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
         if self._nav_state == 14 and self._arming_state == 2:
             self._arm_offboard_confirmed = True
             self.get_logger().info(
@@ -809,8 +819,10 @@ class MpcControllerNode(Node):
             if self._cmd_retry_counter % 50 == 1:
                 self._arm_and_engage_offboard()
                 if not self._arm_offboard_confirmed:
+                    action = ('retry ARM+OFFBOARD' if self.auto_arm_enable
+                              else 'waiting RC ARM+OFFBOARD')
                     self.get_logger().info(
-                        f'drone {self.drone_id}: retry ARM+OFFBOARD '
+                        f'drone {self.drone_id}: {action} '
                         f'(nav={self._nav_state}, arm={self._arming_state}) '
                         f'frame={self._cmd_retry_counter}')
             self._hover_active = True
