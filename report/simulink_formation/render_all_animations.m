@@ -104,7 +104,7 @@ for s = 1:numel(scn)
     frames = 1:stp:L;
     TRAIL = round(15/(tAll(2)-tAll(1)));
 
-    fig = figure('Visible', 'off', 'Position', [80 80 1100 750], 'Color', 'w');
+    fig = figure('Visible', 'off', 'Position', [80 80 1280 720], 'Color', 'w');
     ax = axes(fig); hold(ax,'on'); grid(ax,'on'); box(ax,'on');
     xlabel('X north [m]'); ylabel('Y east [m]'); zlabel('Alt [m]');
     view(ax, -35, 28); axis(ax, 'equal');
