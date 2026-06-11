@@ -1,5 +1,6 @@
-%% render_all_animations.m — 其余场景 3D 动画 MP4 批量渲染
-% pair2 hover / pair2 line / trio3 circle 扰动出生（trio3 circle 标准版已有）
+%% render_all_animations.m — 所有场景 3D 动画 MP4 批量渲染
+% pair2 hover / pair2 line / pair2 perturbed /
+% trio3 hover / trio3 line / trio3 circle 扰动出生（trio3 circle 标准版已有）
 % 输出 ../figures/simulink_<scenario>_formation.mp4
 
 clear; clc; close all;
@@ -10,7 +11,9 @@ if ~bdIsLoaded(mdl), load_system(mdl); end
 blk6dof = [mdl '/6DOF (Euler Angles)'];
 OUTDIR = fullfile(fileparts(pwd), 'figures');
 
-BIRTH_PAIR2 = [0 0 0; -3 0 0];
+BIRTH_PAIR2      = [0 0 0; -3 0 0];
+BIRTH_PAIR2_PERT = [0.5 0.3 0; -2.7 -0.4 0];
+BIRTH_TRIO3      = [3 0 0; -1.5 2.598 0; -1.5 -2.598 0];
 BIRTH_TRIO3_PERT = [3.3 0.5 0; -1.2 2.8 0; -1.8 -2.3 0];
 dtc = 0.05;
 
@@ -32,15 +35,39 @@ scn(2).mass = []; scn(2).xl = [-6 24]; scn(2).yl = [-6 6];
 scn(2).title = 'Simulink PID pair2 Line v=0.5 m/s';
 scn(2).refcircle = false;
 
+% trio3 hover, 30s
+T = 30; t = (0:dtc:T)';
+scn(3).name = 'trio3_hover'; scn(3).births = BIRTH_TRIO3; scn(3).T = T; scn(3).t = t;
+scn(3).vx = zeros(size(t)); scn(3).vy = zeros(size(t)); scn(3).vz = -1.0*(t<5);
+scn(3).mass = []; scn(3).xl = [-5 7]; scn(3).yl = [-6 6];
+scn(3).title = 'Simulink PID trio3 Hover';
+scn(3).refcircle = false;
+
+% trio3 line v=0.5 d=20, 60s
+T = 60; t = (0:dtc:T)';
+scn(4).name = 'trio3_line'; scn(4).births = BIRTH_TRIO3; scn(4).T = T; scn(4).t = t;
+scn(4).vx = 0.5*(t>=10 & t<50); scn(4).vy = zeros(size(t)); scn(4).vz = -1.0*(t<5);
+scn(4).mass = []; scn(4).xl = [-5 26]; scn(4).yl = [-6 6];
+scn(4).title = 'Simulink PID trio3 Line v=0.5 m/s';
+scn(4).refcircle = false;
+
+% pair2 扰动出生 line v=0.5, 70s — PID 无法收敛
+T = 70; t = (0:dtc:T)';
+scn(5).name = 'pair2_perturbed'; scn(5).births = BIRTH_PAIR2_PERT; scn(5).T = T; scn(5).t = t;
+scn(5).vx = 0.5*(t>=10 & t<50); scn(5).vy = zeros(size(t)); scn(5).vz = -1.0*(t<5);
+scn(5).mass = []; scn(5).xl = [-5 25]; scn(5).yl = [-4 4];
+scn(5).title = 'Simulink PID pair2 Line — perturbed birth (PID 不收敛)';
+scn(5).refcircle = false;
+
 % trio3 circle 扰动出生 + 质量离散, 65s
 T = 65; t = (0:dtc:T)'; R = 10; v = 1.5; om = v/R; tc = max(t-10, 0);
-scn(3).name = 'trio3_circle_perturbed'; scn(3).births = BIRTH_TRIO3_PERT;
-scn(3).T = T; scn(3).t = t;
-scn(3).vx = -v*sin(om*tc).*(t>=10); scn(3).vy = v*cos(om*tc).*(t>=10);
-scn(3).vz = -1.0*(t<5);
-scn(3).mass = Mass*[1.05 0.95 1.00]; scn(3).xl = [-26 10]; scn(3).yl = [-15 15];
-scn(3).title = 'Simulink PID trio3 Circle — perturbed birth (PID 不收敛)';
-scn(3).refcircle = true;
+scn(6).name = 'trio3_circle_perturbed'; scn(6).births = BIRTH_TRIO3_PERT;
+scn(6).T = T; scn(6).t = t;
+scn(6).vx = -v*sin(om*tc).*(t>=10); scn(6).vy = v*cos(om*tc).*(t>=10);
+scn(6).vz = -1.0*(t<5);
+scn(6).mass = Mass*[1.05 0.95 1.00]; scn(6).xl = [-26 10]; scn(6).yl = [-15 15];
+scn(6).title = 'Simulink PID trio3 Circle — perturbed birth (PID 不收敛)';
+scn(6).refcircle = true;
 
 cols = {[0 0.447 0.741], [0.851 0.325 0.098], [0.466 0.674 0.188]};
 armR = 0.8; FPS = 20; SPEED = 2.0;

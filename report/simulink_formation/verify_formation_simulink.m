@@ -3,9 +3,9 @@
 % 多实例运行：每机注入同一速度指令轨迹（与实机 MPC→PX4 速度通道同构），
 % 不同 Xe0 出生位置，合并轨迹计算队形误差 / 最小间距。
 %
-% 场景: pair2 hover / pair2 line(v=0.5) / trio3 hover / trio3 line(v=0.5) /
-%        trio3 circle(R=10,v=1.5) / trio3 circle perturbed
-% 输出: ../figures/simulink_pair2_hover.png / _pair2_line.png /
+% 场景: pair2 hover / pair2 line / pair2 perturbed /
+%        trio3 hover / trio3 line / trio3 circle / trio3 circle perturbed
+% 输出: ../figures/simulink_pair2_hover.png / _pair2_line.png / _pair2_perturbed.png /
 %        simulink_trio3_hover.png / _trio3_line.png /
 %        _trio3_circle.png / _trio3_circle_perturbed.png
 %       控制台指标 + verdict
@@ -128,6 +128,19 @@ scn(4).vy =  v * cos(om * tc) .* (t >= 10);
 scn(4).vz = -1.0 * (t < 5); scn(4).t = t;
 scn(4).png = 'simulink_trio3_circle_perturbed.png';
 scn(4).title = 'Simulink PID trio3 Circle — perturbed birth + ±5% mass (no formation feedback)';
+
+% S-G: pair2 扰动出生(S17 birth_override) — PID 无法收敛实证
+%      与 trio3 扰动对称：2机版的编队误差恒定不收敛
+T = 70; t = (0:dtc:T)';
+BIRTH_PAIR2_PERT = [ 0.5   0.3   0;
+                    -2.7  -0.4   0];
+scn(7).name = 'pair2-perturbed'; scn(7).births = BIRTH_PAIR2_PERT; scn(7).T = T;
+scn(7).nominal = BIRTH_PAIR2;    % 队形误差对标标准 pair2
+scn(7).vx = 0.5 * (t >= 10 & t < 50);
+scn(7).vy = zeros(size(t));
+scn(7).vz = -1.0 * (t < 5); scn(7).t = t;
+scn(7).png = 'simulink_pair2_perturbed.png';
+scn(7).title = 'Simulink PID pair2 Line — perturbed birth (no formation feedback)';
 
 D_SAFE = 1.5; FORM_THR = 0.5;
 
