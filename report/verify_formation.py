@@ -62,6 +62,10 @@ SCENARIOS = [
      'pair2 Hover — MPC Formation Verification (standalone acados)'),
     ('pair2', 'line',   70.0, 'verify_pair2_line.png',
      'pair2 Line v=0.5 m/s, d=20 m — MPC Formation Verification'),
+    ('trio3', 'hover',  40.0, 'verify_trio3_hover.png',
+     'trio3 Hover — MPC Formation Verification (standalone acados)'),
+    ('trio3', 'line',   70.0, 'verify_trio3_line.png',
+     'trio3 Line v=0.5 m/s, d=20 m — MPC Formation Verification'),
     ('trio3', 'circle', 80.0, 'verify_trio3_circle.png',
      'trio3 Circle R=10 m, v=1.5 m/s — MPC Formation Verification'),
 ]

@@ -3,8 +3,11 @@
 % 多实例运行：每机注入同一速度指令轨迹（与实机 MPC→PX4 速度通道同构），
 % 不同 Xe0 出生位置，合并轨迹计算队形误差 / 最小间距。
 %
-% 场景: pair2 hover / pair2 line(v=0.5) / trio3 circle(R=10,v=1.5)
-% 输出: ../figures/simulink_pair2_hover.png / _pair2_line.png / _trio3_circle.png
+% 场景: pair2 hover / pair2 line(v=0.5) / trio3 hover / trio3 line(v=0.5) /
+%        trio3 circle(R=10,v=1.5) / trio3 circle perturbed
+% 输出: ../figures/simulink_pair2_hover.png / _pair2_line.png /
+%        simulink_trio3_hover.png / _trio3_line.png /
+%        _trio3_circle.png / _trio3_circle_perturbed.png
 %       控制台指标 + verdict
 
 clear; clc; close all;
@@ -92,6 +95,23 @@ scn(3).vy =  v * cos(om * tc) .* (t >= 10);
 scn(3).vz = -1.0 * (t < 5); scn(3).t = t;
 scn(3).png = 'simulink_trio3_circle.png';
 scn(3).title = 'Simulink PID trio3 Circle R=10 m, v=1.5 m/s';
+
+% S-E: trio3 hover, 30s
+T = 30; t = (0:dtc:T)';
+scn(5).name = 'trio3-hover'; scn(5).births = BIRTH_TRIO3; scn(5).T = T;
+scn(5).vx = zeros(size(t)); scn(5).vy = zeros(size(t));
+scn(5).vz = -1.0 * (t < 5); scn(5).t = t;
+scn(5).png = 'simulink_trio3_hover.png';
+scn(5).title = 'Simulink PID trio3 Hover (climb to 5 m, hold)';
+
+% S-F: trio3 line v=0.5, d=20 → 巡航 40s, 总 60s
+T = 60; t = (0:dtc:T)';
+scn(6).name = 'trio3-line'; scn(6).births = BIRTH_TRIO3; scn(6).T = T;
+scn(6).vx = 0.5 * (t >= 10 & t < 50);
+scn(6).vy = zeros(size(t));
+scn(6).vz = -1.0 * (t < 5); scn(6).t = t;
+scn(6).png = 'simulink_trio3_line.png';
+scn(6).title = 'Simulink PID trio3 Line v=0.5 m/s, d=20 m';
 
 % S-D: trio3 circle 扰动出生(S19 birth_override) + ±5% 质量离散
 %      PID 编队层无位置反馈 → 预期 form_err 不收敛（对照 MPC S19 可收敛）

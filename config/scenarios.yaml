@@ -86,6 +86,8 @@ scenarios:
   S1_solo1_line:    {formation: solo1,  leader: {mode: line,   speed: 1.0, max_distance: 20.0, yaw_mode: tangent}}
   S2_pair2_line:    {formation: pair2,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
   S2_pair2_hover:   {formation: pair2,  leader: {mode: hover}}
+  S3_trio3_hover:   {formation: trio3,  leader: {mode: hover}}
+  S3_trio3_line:    {formation: trio3,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
   S3_trio3_circle:  {formation: trio3,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}}
   # +ready_hold 缓冲入轨：先静止把队形收敛到 pos_err<0.3 再走圆周，消除起步"边追边成型"畸变
   # (朴素 S3 实测起步瞬态间距掉 0.58m/3违规)。wf 保持默认 0.5——6-09 扫描确认 wf≤0.1 全失稳，
