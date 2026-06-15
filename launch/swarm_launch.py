@@ -82,6 +82,16 @@ def _make_nodes(context, *args, **kwargs):
     for k, v in scen.get('limits', {}).items():
         common[k] = float(v)
 
+    # ── 5/9 机高度拉齐：开 Tier2 alt re-sync 并加快收敛 ───────────────────────
+    # SITL 多 PX4 实例 baro/EKF 的 ref_alt 各自温漂，不拉齐则各机控到 local z=-5
+    # 时真实高度散 ~1.5m。drone0 广播 ref_alt 基准、各机限速纠 world_birth_z。
+    # rate 0.05→0.2(补 0.5m 偏差 10s→2.5s)、EMA alpha 0.05→0.1(滤波 0.4s→0.2s)。
+    # 实测 5 机悬停真高散 1.5m→0.18m。2/3 机漂移小、不开。
+    if formation in ('cross5', 'star5', 'grid9'):
+        common['alt_resync_enable'] = True
+        common['alt_resync_rate'] = 0.2
+        common['alt_ref_filter_alpha'] = 0.1
+
     # ── P2 故障注入：scenario.faults（S14 杀节点 / S16 通信劣化）──────────────
     faults = scen.get('faults', {})
     if 'comms_delay_ms' in faults:
