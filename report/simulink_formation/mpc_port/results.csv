@@ -1,0 +1,8 @@
+formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict
+solo1,hover,0.0000,0.0000,0.0001,Inf,PASS
+solo1,line,0.0000,0.5605,0.0006,Inf,REVIEW
+solo1,circle,0.0000,1.1806,0.0008,Inf,REVIEW
+pair2,hover,0.0000,0.0000,0.0001,3.0000,PASS
+pair2,line,0.0000,0.5621,0.0006,3.0000,REVIEW
+pair2,circle,0.0000,1.1803,0.0008,3.0000,REVIEW
+trio3,hover,0.0000,0.0000,0.0001,5.1960,PASS

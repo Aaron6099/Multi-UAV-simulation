@@ -22,6 +22,6 @@ Thumbs.db
 # 个人/工作文档（保留在本地桌面，不入库）
 *.docx
 
-# Simulink build cache
-report/simulink_formation/slprj/
+# Simulink build cache（slprj 在任意子目录都忽略，含 mpc_port/slprj）
+report/simulink_formation/**/slprj/
 *.slxc
