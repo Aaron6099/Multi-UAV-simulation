@@ -19,6 +19,8 @@ from px4_msgs.msg import (
     VehicleStatus,
 )
 
+from mpc_control.safety_filter import SafetyFilter
+
 
 # ------------------------------------------------------------------ helpers
 def make_px4_qos():
@@ -238,6 +240,8 @@ class DroneState:
         self.pos = np.zeros(3)
         self.vel = np.zeros(3)
         self.yaw = 0.0
+        self.xy_valid = False   # EKF 水平估计健康（safety_filter 估计门用）
+        self.z_valid = False    # EKF 垂直估计健康
 
 
 # -- node
@@ -306,6 +310,13 @@ class MpcControllerNode(Node):
         # 等待飞手用 RC 解锁+切 OFFBOARD（PX4 要求切换前 setpoint 流已 >2Hz，满足）。
         # SITL 无 RC，保持默认 true 自动解锁。
         self.declare_parameter('auto_arm_enable', True)
+
+        # companion 安全滤波层（缺省保守；真机经 launch 覆盖，d_emergency 应 < d_safe）
+        self.declare_parameter('safety_filter_enable', True)
+        self.declare_parameter('safety_max_track_dist', 5.0)   # m，偏离参考点上限=飞散阈值
+        self.declare_parameter('safety_max_alt', 8.0)          # m，最大离地绝对高度
+        self.declare_parameter('safety_min_alt', 0.3)          # m，最小离地绝对高度
+        self.declare_parameter('safety_d_emergency', 1.2)      # m，硬碰撞地板（< d_safe）
 
         self.drone_id   = int(self.get_parameter('drone_id').value)
         self.num_drones = int(self.get_parameter('num_drones').value)
@@ -439,6 +450,25 @@ class MpcControllerNode(Node):
             instance_id=self.drone_id,
         )
         self.get_logger().info('acados OCP ready.')
+
+        # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
+        self._relinquished = False
+        if bool(self.get_parameter('safety_filter_enable').value):
+            s_track = float(self.get_parameter('safety_max_track_dist').value)
+            s_maxa  = float(self.get_parameter('safety_max_alt').value)
+            s_mina  = float(self.get_parameter('safety_min_alt').value)
+            s_demg  = float(self.get_parameter('safety_d_emergency').value)
+            self.safety = SafetyFilter(
+                max_track_dist=s_track, max_alt=s_maxa, min_alt=s_mina,
+                d_emergency=s_demg, d_warn=max(s_demg + 0.5, d_safe),
+                max_speed=self.max_speed, max_climb=self.max_climb,
+                max_accel=self.max_accel, drone_id=self.drone_id)
+            self.get_logger().info(
+                f'safety_filter ON: track<{s_track}m alt[{s_mina},{s_maxa}]m '
+                f'd_emerg={s_demg}m d_warn={max(s_demg + 0.5, d_safe)}m')
+        else:
+            self.safety = None
+            self.get_logger().warn('safety_filter OFF（仅调试用，真机务必开）')
 
         # ROS 2 IO
         qos     = make_px4_qos()      # 订阅 PX4 "out" 话题（TRANSIENT_LOCAL）
@@ -673,6 +703,8 @@ class MpcControllerNode(Node):
 
             ds.received = True
             ds.last_stamp = now
+            ds.xy_valid = bool(msg.xy_valid)   # EKF 健康（safety_filter 估计门）
+            ds.z_valid = bool(msg.z_valid)
             # Use DYNAMIC world_birth (compensates for EKF resets)
             ds.pos = np.array([msg.x, msg.y, msg.z]) + self.world_birth[drone_idx]
             ds.vel = np.array([msg.vx, msg.vy, msg.vz])
@@ -795,6 +827,8 @@ class MpcControllerNode(Node):
                 target if abs(err) <= step else cur + math.copysign(step, err))
 
     def control_loop(self):
+        if self._relinquished:
+            return   # 已交还 PX4：停发 offboard/setpoint，由 FC 失效保护接管
         self.publish_offboard_mode()
         now_ros = self.get_clock().now()
         dt = (now_ros - self.last_control_time).nanoseconds * 1e-9
@@ -929,6 +963,31 @@ class MpcControllerNode(Node):
         # Safety: NaN check
         if not np.all(np.isfinite(vel_sp)):
             vel_sp = np.zeros(3)
+
+        # ── companion 安全滤波层：围栏/碰撞地板/估计门/失效状态机（下发前）──
+        if self.safety is not None:
+            now_s = now_ros.nanoseconds * 1e-9
+            nbrs = [(self.drone_states[j].pos,
+                     self.drone_states[j].received
+                     and (now_s - self.drone_states[j].last_stamp) <= self.neighbour_timeout)
+                    for j in self.neighbours]
+            est_ok = (self_ds.xy_valid and self_ds.z_valid
+                      and (now_s - self_ds.last_stamp) <= self.neighbour_timeout)
+            sres = self.safety.step(self_ds.pos, self_ds.vel, vel_sp, ref_pos, dt,
+                                    neighbours=nbrs, est_ok=est_ok)
+            vel_sp = sres['vel_sp']
+            if sres['state'] != 'NORMAL':
+                self._hover_active = True
+                if self._dbg_counter % int(self.control_hz) == 0:
+                    self.get_logger().warn(
+                        f"[d{self.drone_id}] SAFETY {sres['state']} {sres['reasons']}")
+            if not sres['publish']:
+                # RELINQUISH：停发，交还 PX4 失效保护（COM_OF_LOSS_T→COM_OBL_RC_ACT）
+                self._relinquished = True
+                self.get_logger().error(
+                    f"[d{self.drone_id}] SAFETY RELINQUISH {sres['reasons']} — 交还 PX4")
+                self._publish_health()
+                return
 
         # Position error for logging
         pos_err = float(np.linalg.norm(pos_err_vec[:2]))
