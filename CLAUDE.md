@@ -12,8 +12,8 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 标准 ROS2 ament_python 包，仓库根目录即 Ubuntu 上的 `src/mpc_control/`：
 
 - `mpc_control/`（Python 模块）：`mpc_node.py` / `leader_node.py` / `virtual_leader_node.py` / `arming_node.py` —— **`ros2 launch` 实际运行的就是这里**
-- `launch/swarm_launch.py`：启动与队形/参数配置（唯一 launch 文件，含 `COMMON` 字典）
-- `config/swarm_config.yaml`：参数文件
+- `launch/swarm_launch.py`：启动入口（**yaml 驱动**，唯一 launch 文件）。队形几何 / 公共参数 / 测试工况均来自 `config/scenarios.yaml`，自 P1 起已删硬编码的 `COMMON`/`OFFSETS_*`/`NBR_*`
+- `config/scenarios.yaml`：**单一真值源**（defaults 公共参数 / formations 队形几何 / scenarios 工况 S1–S26）；`config/swarm_config.yaml` 为节点参数文件
 - 根目录：`start_{1,2,3,5,9}_px4.sh`（bash 直接跑）、`diag_monitor.py`（python3 直接跑）、`setup.py`/`package.xml`
 
 > 编辑代码只改 `mpc_control/` 模块和 `launch/`；**绝不在根目录另存 `mpc_node.py`/`leader_node.py`/`swarm_launch.py` 副本**。2026-05-29 已清理一批重构前的过时副本——根目录那些不会被 ROS2 编译，曾导致"改了没生效"。提交一律用 `/commit-push`（`git add -A`）。
@@ -40,7 +40,7 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 
 ## 关键参数位置
 
-所有运行参数集中在 `swarm_launch.py` 的 `COMMON` 字典，修改此处即可，无需改 `mpc_node.py`。
+所有运行参数集中在 `config/scenarios.yaml` 的 `defaults`（旧 `swarm_launch.py` 的 `COMMON` 字典已迁移至此），修改后 `colcon build` 即可，无需改 `mpc_node.py`。
 
 重要参数：
 - `max_speed`: 3.0 m/s（速度控制模式下的速度设定点限幅）
@@ -69,7 +69,7 @@ PX4 v1.14 多机编队仿真，5/9 架无人机，ROS2 + acados MPC 控制。
 | star5 | 5 | 正五边形，环形邻居 | R=3 m |
 | grid9 | 9 | 3×3 方阵 | 3 m |
 
-队形偏移定义在 `swarm_launch.py`：`OFFSETS_*`；邻居列表：`NBR_*`。
+队形偏移 / 邻居定义在 `config/scenarios.yaml` 的 `formations.<name>`（`offsets` / `neighbours`）；旧 `swarm_launch.py` 的 `OFFSETS_*`/`NBR_*` 已迁移至此。
 
 ## Ubuntu 端构建与启动顺序
 

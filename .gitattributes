@@ -8,3 +8,10 @@
 # Launch 文件
 *.yaml  text eol=lf
 *.json  text eol=lf
+
+# 二进制：禁止行尾转换与文本化 diff/merge（避免 .slx/.mp4 等被误处理）
+*.slx   binary
+*.slxc  binary
+*.mp4   binary
+*.pdf   binary
+*.png   binary
