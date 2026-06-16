@@ -25,3 +25,6 @@ Thumbs.db
 # Simulink build cache
 report/simulink_formation/slprj/
 *.slxc
+
+# Claude Code local (per-machine) settings — platform-specific hooks live here, not in git
+.claude/settings.local.json

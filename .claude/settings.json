@@ -1,17 +1,1 @@
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"C:/Users/Aaron/AppData/Local/Python/pythoncore-3.14-64/python.exe\" -c \"import sys,json,py_compile; d=json.loads(sys.stdin.buffer.read().decode('utf-8')); f=((d.get('tool_input') or {}).get('file_path') or (d.get('tool_response') or {}).get('filePath') or '').strip(); py_compile.compile(f,doraise=True) if f.endswith('.py') else None\" 2>&1 || true",
-            "timeout": 10,
-            "statusMessage": "Checking Python syntax..."
-          }
-        ]
-      }
-    ]
-  }
-}
+{}
