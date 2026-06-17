@@ -91,32 +91,39 @@ fprintf(['  steady: form_err=%.3fm  track_err=%.3fm  alt_err=%.3fm  ' ...
     'min_sp=%.3fm\n  VERDICT: %s\n'], m_form, m_track, m_alt, m_minsp, verdict);
 
 % ── 图 ──────────────────────────────────────────────────────────────────
-fig = figure('Visible', 'off', 'Position', [50 50 1280 720]);
-subplot(2,2,1); hold on; grid on; axis equal
-cols = lines(n);
-for i = 1:n
-    plot(pos(:,2,i), pos(:,1,i), '-', 'Color', cols(i,:));
-    plot(pos(end,2,i), pos(end,1,i), 'o', 'Color', cols(i,:), 'MarkerFaceColor', cols(i,:));
+try
+    fig = figure('Visible', 'off', 'Position', [50 50 1280 720]);
+    subplot(2,2,1); hold on; grid on; axis equal
+    cols = lines(n);
+    for i = 1:n
+        plot(pos(:,2,i), pos(:,1,i), '-', 'Color', cols(i,:));
+        plot(pos(end,2,i), pos(end,1,i), 'o', 'Color', cols(i,:), 'MarkerFaceColor', cols(i,:));
+    end
+    plot(lead(:,2), lead(:,1), 'k--');
+    xlabel('East [m]'); ylabel('North [m]');
+    title(sprintf('MPC %s %s — 俯视轨迹', formation, mode));
+    subplot(2,2,2); plot(t, form_err); grid on
+    xlabel('t [s]'); ylabel('form\_err [m]'); title('编队误差(邻居对均值)');
+    subplot(2,2,3); plot(t, alt); yline(cfg.target_alt, 'k--'); grid on
+    xlabel('t [s]'); ylabel('z NED [m]'); title('高度');
+    subplot(2,2,4); hold on; grid on
+    if ~isempty(pairs)
+        plot(t, min_sp); yline(cfg.d_safe, 'r--', 'd\_safe');
+        ylabel('min spacing [m]'); title('最小间距');
+    else
+        plot(t, track_err); ylabel('track\_err [m]'); title('跟踪误差');
+    end
+    xlabel('t [s]');
+    fig_dir = fullfile(fileparts(fileparts(here)), 'figures');
+    if ~exist(fig_dir, 'dir'), mkdir(fig_dir); end
+    png = fullfile(fig_dir, sprintf('mpc_%s_%s.png', formation, mode));
+    exportgraphics(fig, png, 'Resolution', 120);
+    close(fig);
+    fprintf('  图: %s\n', png);
+catch ME
+    fprintf('  [警告] 图生成失败: %s\n', ME.message);
+    try, close(fig); catch, end
 end
-plot(lead(:,2), lead(:,1), 'k--');
-xlabel('East [m]'); ylabel('North [m]');
-title(sprintf('MPC %s %s — 俯视轨迹', formation, mode));
-subplot(2,2,2); plot(t, form_err); grid on
-xlabel('t [s]'); ylabel('form\_err [m]'); title('编队误差(邻居对均值)');
-subplot(2,2,3); plot(t, alt); yline(cfg.target_alt, 'k--'); grid on
-xlabel('t [s]'); ylabel('z NED [m]'); title('高度');
-subplot(2,2,4); hold on; grid on
-if ~isempty(pairs)
-    plot(t, min_sp); yline(cfg.d_safe, 'r--', 'd\_safe');
-    ylabel('min spacing [m]'); title('最小间距');
-else
-    plot(t, track_err); ylabel('track\_err [m]'); title('跟踪误差');
-end
-xlabel('t [s]');
-png = fullfile(fileparts(fileparts(here)), 'figures', sprintf('mpc_%s_%s.png', formation, mode));
-exportgraphics(fig, png, 'Resolution', 120);
-close(fig);
-fprintf('  图: %s\n', png);
 
 % 结果累积 CSV
 csv = fullfile(here, 'results.csv');

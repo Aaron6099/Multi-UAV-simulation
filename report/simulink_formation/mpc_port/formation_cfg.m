@@ -1,6 +1,6 @@
 function cfg = formation_cfg(formation, mode)
 %FORMATION_CFG 队形+运动方式 → 完整场景配置（与 config/scenarios.yaml 同真值）
-%   formation: 'solo1' | 'pair2' | 'trio3'
+%   formation: 'solo1' | 'pair2' | 'trio3' | 'cross5'
 %   mode:      'hover' | 'line'  | 'circle'
 % 几何(NED)与 MPC 参数逐项对照 scenarios.yaml defaults + formations，
 % 改 yaml 后请同步本文件（Simulink 侧不解析 yaml，避免依赖）。
@@ -16,6 +16,9 @@ switch formation
     case 'trio3'
         births = [3 0 0; -1.5 2.598 0; -1.5 -2.598 0];
         nbrs   = {[2 3], [1 3], [1 2]};
+    case 'cross5'                             % 十字：出生即队形（对照 scenarios.yaml）
+        births = [0 0 0; 0 3 0; 0 -3 0; 3 0 0; -3 0 0];
+        nbrs   = {[2 3 4 5], [1], [1], [1], [1]};
     otherwise
         error('未知 formation "%s"', formation);
 end
@@ -64,5 +67,17 @@ switch mode
         cfg.T = 65;
     otherwise
         error('未知 mode "%s"', mode);
+end
+% ── formation × mode 组合覆盖（对照 scenarios.yaml limits 字段）─────────────
+if strcmp(formation, 'cross5')
+    switch mode
+        case 'line'
+            cfg.lead_v = 1.0;          % S4: speed=1.0（默认 1.5 降速）
+        case 'circle'
+            cfg.lead_v = 1.0;          % S5: speed=1.0
+            cfg.w_coll = 500.0;        % S5: limits.w_collision=500（防中心-臂入轨碰）
+            cfg.t_start = 30.0;        % S5: ready_hold=30s（5 机成型收敛缓冲）
+            cfg.T = 100;               % 30s hold + ~63s 圆周 ≈ 一整圈
+    end
 end
 end
