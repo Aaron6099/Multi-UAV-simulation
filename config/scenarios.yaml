@@ -102,13 +102,13 @@ scenarios:
                            limits: {w_formation: 0.05}}
   S3_trio3_circle_wf005_v2: {formation: trio3, leader: {mode: circle, speed: 2.0, radius: 10.0, yaw_mode: center},
                                limits: {w_formation: 0.05}}
-  S4_cross5_line:   {formation: cross5, leader: {mode: line,   speed: 1.0, max_distance: 20.0}}
+  S4_cross5_line:   {formation: cross5, leader: {mode: line,   speed: 1.0, max_distance: 20.0, ready_hold: 30.0, ready_pos_err: 0.3}}
   # 入轨防撞+缓冲：speed 1.5→1.0(减小入轨角加速度)、ready_hold 30s 先成型再走、
   # w_collision 200→500(碰撞软壁加硬，迫使中心机优先避撞而非保队形)。
   # 实测入轨 min_spacing 2.87m、0 违规、0 fallback（修复前中心-臂曾掉到 0.03m）。
   S5_cross5_circle: {formation: cross5, leader: {mode: circle, speed: 1.0, radius: 10.0, yaw_mode: center, ready_hold: 30.0, ready_pos_err: 0.3}, limits: {w_collision: 500.0}}
   S6_cross5_hover:  {formation: cross5, leader: {mode: hover}}
-  S7_grid9_line:    {formation: grid9,  leader: {mode: line,   speed: 1.0, max_distance: 20.0},
+  S7_grid9_line:    {formation: grid9,  leader: {mode: line,   speed: 1.0, max_distance: 20.0, ready_hold: 30.0, ready_pos_err: 0.3},
                      thresholds: {solve_ms: 15.0}}
   S8_grid9_circle:  {formation: grid9,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
                      thresholds: {solve_ms: 15.0}}
