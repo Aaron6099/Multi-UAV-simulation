@@ -132,7 +132,7 @@ for k = 1:Nsteps
     % 被控对象：一阶速度响应
     vel = vel + (vel_sp - vel) * (dt / tau_v);
     pos = pos + vel * dt;
-    pos_log(k,:,:) = pos';
+    pos_log(k,:,:) = reshape(pos, [1,3,n]);
 end
 fprintf('  完成 %.1fs\n', toc);
 
@@ -203,7 +203,7 @@ end
 plot(lead_xy(:,2), lead_xy(:,1), 'k--','LineWidth',1);
 xlabel('East [m]'); ylabel('North [m]');
 title(sprintf('MPC trio3 hover — 俯视轨迹'));
-legend(arrayfun(@(i)sprintf('drone%d',i-1),1:n,'UniformOutput',false),'leader','Location','best');
+legend([arrayfun(@(i)sprintf('drone%d',i-1),1:n,'UniformOutput',false),{'leader'}],'Location','best');
 
 subplot(2,2,2); plot(t_log, form_err,'b','LineWidth',1.2); grid on
 xlabel('t [s]'); ylabel('form\_err [m]'); title('编队误差（邻居对均值）');
