@@ -27,13 +27,17 @@ function res = mpc_solo1_circle()
     cfg.n         = 1;
     cfg.births    = [0 0 0];
     cfg.offsets   = cfg.births;
-    cfg.nbrs      = {{[]}};
+    cfg.nbrs      = {[]};
 
     % 期望间距 d*（xy 平面）
     cfg.dstar = cell(cfg.n, 1);
     for i = 1:cfg.n
         js = cfg.nbrs{i};
-        cfg.dstar{i} = arrayfun(@(j) norm(cfg.offsets(i,1:2)-cfg.offsets(j,1:2)), js);
+        if isempty(js)
+            cfg.dstar{i} = [];
+        else
+            cfg.dstar{i} = arrayfun(@(j) norm(cfg.offsets(i,1:2)-cfg.offsets(j,1:2)), js);
+        end
     end
 
     % MPC 参数（= scenarios.yaml defaults）

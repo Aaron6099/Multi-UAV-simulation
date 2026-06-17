@@ -30,7 +30,11 @@ function res = mpc_pair2_hover()
     cfg.dstar = cell(cfg.n, 1);
     for i = 1:cfg.n
         js = cfg.nbrs{i};
-        cfg.dstar{i} = arrayfun(@(j) norm(cfg.offsets(i,1:2)-cfg.offsets(j,1:2)), js);
+        if isempty(js)
+            cfg.dstar{i} = [];
+        else
+            cfg.dstar{i} = arrayfun(@(j) norm(cfg.offsets(i,1:2)-cfg.offsets(j,1:2)), js);
+        end
     end
 
     % MPC 参数（= scenarios.yaml defaults）
