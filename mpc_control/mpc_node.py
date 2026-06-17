@@ -847,7 +847,13 @@ class MpcControllerNode(Node):
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
-        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed
+        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed.
+        # Also re-arm if OFFBOARD was lost after initial confirmation (nav dropped from 14).
+        if self._arm_offboard_confirmed and self.auto_arm_enable and self._nav_state != 14:
+            self._arm_offboard_confirmed = False
+            self._cmd_retry_counter = 0
+            self.get_logger().warn(
+                f'drone {self.drone_id}: OFFBOARD LOST (nav={self._nav_state}) — resetting, will re-arm')
         if not self._arm_offboard_confirmed:
             self._cmd_retry_counter += 1
             if self._cmd_retry_counter % 50 == 1:
