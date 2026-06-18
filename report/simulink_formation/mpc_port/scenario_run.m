@@ -136,15 +136,27 @@ catch ME
     try, close(fig); catch, end
 end
 
-% 结果累积 CSV
+% 结果累积 CSV（去重：同 formation+mode 已存在则覆盖，防重跑产生重复行）
 csv = fullfile(here, 'results.csv');
+hdr = 'formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict';
+newrow = sprintf('%s,%s,%.4f,%.4f,%.4f,%.4f,%s', formation, mode, ...
+    m_form, m_track, m_alt, m_minsp, verdict);
 if ~exist(csv, 'file')
     fid = fopen(csv, 'w');
-    fprintf(fid, 'formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict\n');
+    fprintf(fid, '%s\n%s\n', hdr, newrow);
+    fclose(fid);
 else
-    fid = fopen(csv, 'a');
+    T0 = readtable(csv, 'TextType', 'string');
+    mask = ~(T0.formation == string(formation) & T0.mode == string(mode));
+    T0 = T0(mask, :);   % 删除旧行
+    fid = fopen(csv, 'w');
+    fprintf(fid, '%s\n', hdr);
+    for r = 1:height(T0)
+        fprintf(fid, '%s,%s,%.4f,%.4f,%.4f,%.4f,%s\n', ...
+            T0.formation(r), T0.mode(r), T0.form_err_m(r), ...
+            T0.track_err_m(r), T0.alt_err_m(r), T0.min_sp_m(r), T0.verdict(r));
+    end
+    fprintf(fid, '%s\n', newrow);
+    fclose(fid);
 end
-fprintf(fid, '%s,%s,%.4f,%.4f,%.4f,%.4f,%s\n', formation, mode, ...
-    m_form, m_track, m_alt, m_minsp, verdict);
-fclose(fid);
 end

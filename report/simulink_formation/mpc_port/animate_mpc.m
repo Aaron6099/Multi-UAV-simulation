@@ -61,7 +61,12 @@ for kk = 1:L
 end
 track_err = squeeze(vecnorm(pos(:,1:2,:) - ref, 2, 2));
 alt = squeeze(pos(:,3,:)); if n==1, alt = alt(:); track_err = track_err(:); end
-steady = t > cfg.t_start + 8;
+% 圆周模式跳过收敛段（与 scenario_run 口径一致）
+if strcmp(mode, 'circle')
+    steady = t > cfg.t_start + 50;
+else
+    steady = t > cfg.t_start + 8;
+end
 m_form  = mean(form_err(steady));
 m_track = mean(max(track_err(steady,:), [], 2));
 m_alt   = mean(max(abs(alt(steady,:) - cfg.target_alt), [], 2));
