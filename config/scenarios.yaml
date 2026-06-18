@@ -83,6 +83,9 @@ formations:
 #   thresholds:     {...}            # 覆盖默认判定阈值
 scenarios:
   # ── CORE（建议必跑，支撑报告主体）──
+  S0_solo1_hover:   {formation: solo1,  leader: {mode: hover}}
+  S0_solo1_circle:  {formation: solo1,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
+                    limits: {safety_max_track_dist: 15.0}}
   S1_solo1_line:    {formation: solo1,  leader: {mode: line,   speed: 1.0, max_distance: 20.0, yaw_mode: tangent}}
   S2_pair2_line:    {formation: pair2,  leader: {mode: line,   speed: 0.5, max_distance: 20.0}}
   S2_pair2_hover:   {formation: pair2,  leader: {mode: hover}}

@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 D_SAFE = 1.5     # m, 碰撞软约束距离 (= diag_monitor SPACING_CRIT)
 D_WARN = 1.8     # m, 预警间距     (= diag_monitor SPACING_WARN)
 READY_ERR = 0.5  # m, "进编队" 判定阈值 (= leader ready_pos_err)
+STEADY_OFFSET = 45.0  # s, 飞行开始后多少秒起算稳态窗口（跳过收敛过渡段）
 
 
 # --------------------------------------------------------------------- io
@@ -119,6 +120,14 @@ def summarize(path):
             settle = float(t[k])
             break
 
+    # 稳态均值: t > t_start + STEADY_OFFSET（跳过收敛过渡段）
+    steady_mask = t > (float(t[0]) + STEADY_OFFSET)
+    if np.any(steady_mask) and ndr > 0:
+        pe_all = np.vstack([get(cols, f'd{i}_poserr', n) for i in range(ndr)])
+        poserr_steady_mean = float(np.nanmean(pe_all[:, steady_mask]))
+    else:
+        poserr_steady_mean = math.nan  # 飞行时长 < STEADY_OFFSET
+
     return {
         'path': path, 'stem': os.path.splitext(os.path.basename(path))[0],
         'ndr': ndr, 'dur': dur, 'has_xy': has_xy,
@@ -126,6 +135,7 @@ def summarize(path):
         'min_spacing': min_spacing, 'min_spacing_t': min_spacing_t,
         'form_max': form_max, 'solve_max': solve_max, 'solve_mean': solve_mean,
         'violations': viol_last, 'fallbacks': fb_last, 'settle': settle,
+        'poserr_steady_mean': poserr_steady_mean,
         'cols': cols,
     }
 
@@ -263,13 +273,17 @@ def write_metrics_table(summaries, labels, out_dir):
     lines = [
         '# Run metrics summary / 各 run 指标汇总',
         '',
-        '| Run | UAV | dur[s] | max pos_err[m] | settle[s] | min spacing[m] '
+        f'> steady_mean: t > t_start + {STEADY_OFFSET:.0f}s 窗口均值（跳过收敛过渡段）；'
+        'overall_mean 为全程均值，含过渡段，仅供参考。',
+        '',
+        '| Run | UAV | dur[s] | max pos_err[m] | steady_mean[m] | settle[s] | min spacing[m] '
         '| form_max[m] | solve max/mean[ms] | violations | fallbacks |',
-        '|---|---|---|---|---|---|---|---|---|---|',
+        '|---|---|---|---|---|---|---|---|---|---|---|',
     ]
     for s, lab in zip(summaries, labels):
         lines.append(
             f"| {lab} | {s['ndr']} | {_fmt(s['dur'],0)} | {_fmt(s['poserr_overall'])} "
+            f"| {_fmt(s['poserr_steady_mean'])} "
             f"| {_fmt(s['settle'],0)} | {_fmt(s['min_spacing'])} | {_fmt(s['form_max'])} "
             f"| {_fmt(s['solve_max'])}/{_fmt(s['solve_mean'])} "
             f"| {s['violations']} | {s['fallbacks']} |"
@@ -317,6 +331,7 @@ def main():
     print('\n== 指标速览 / quick metrics ==')
     for s, lab in zip(summaries, labels):
         print(f"  {lab}: pos_err_max={_fmt(s['poserr_overall'])}m  "
+              f"steady_mean={_fmt(s['poserr_steady_mean'])}m(t>{STEADY_OFFSET:.0f}s)  "
               f"min_spacing={_fmt(s['min_spacing'])}m  "
               f"settle={_fmt(s['settle'],0)}s  "
               f"solve_max={_fmt(s['solve_max'])}ms  "

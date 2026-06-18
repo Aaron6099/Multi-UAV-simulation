@@ -317,6 +317,7 @@ class MpcControllerNode(Node):
         self.declare_parameter('safety_max_alt', 8.0)          # m，最大离地绝对高度
         self.declare_parameter('safety_min_alt', 0.3)          # m，最小离地绝对高度
         self.declare_parameter('safety_d_emergency', 1.2)      # m，硬碰撞地板（< d_safe）
+        self.declare_parameter('safety_self_timeout', 0.3)     # s，自机 EKF 话题新鲜度门限（独立于邻居超时）
 
         self.drone_id   = int(self.get_parameter('drone_id').value)
         self.num_drones = int(self.get_parameter('num_drones').value)
@@ -453,19 +454,22 @@ class MpcControllerNode(Node):
 
         # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
         self._relinquished = False
+        self._safety_self_timeout = 0.3   # 默认值；safety ON 时由参数覆盖
         if bool(self.get_parameter('safety_filter_enable').value):
             s_track = float(self.get_parameter('safety_max_track_dist').value)
             s_maxa  = float(self.get_parameter('safety_max_alt').value)
             s_mina  = float(self.get_parameter('safety_min_alt').value)
             s_demg  = float(self.get_parameter('safety_d_emergency').value)
+            self._safety_self_timeout = float(self.get_parameter('safety_self_timeout').value)
+            s_dwarn = max(s_demg + 0.5, d_safe + 0.5)
             self.safety = SafetyFilter(
                 max_track_dist=s_track, max_alt=s_maxa, min_alt=s_mina,
-                d_emergency=s_demg, d_warn=max(s_demg + 0.5, d_safe),
+                d_emergency=s_demg, d_warn=s_dwarn,
                 max_speed=self.max_speed, max_climb=self.max_climb,
                 max_accel=self.max_accel, drone_id=self.drone_id)
             self.get_logger().info(
                 f'safety_filter ON: track<{s_track}m alt[{s_mina},{s_maxa}]m '
-                f'd_emerg={s_demg}m d_warn={max(s_demg + 0.5, d_safe)}m')
+                f'd_emerg={s_demg}m d_warn={s_dwarn}m self_timeout={self._safety_self_timeout}s')
         else:
             self.safety = None
             self.get_logger().warn('safety_filter OFF（仅调试用，真机务必开）')
@@ -978,7 +982,7 @@ class MpcControllerNode(Node):
                      and (now_s - self.drone_states[j].last_stamp) <= self.neighbour_timeout)
                     for j in self.neighbours]
             est_ok = (self_ds.xy_valid and self_ds.z_valid
-                      and (now_s - self_ds.last_stamp) <= self.neighbour_timeout)
+                      and (now_s - self_ds.last_stamp) <= self._safety_self_timeout)
             sres = self.safety.step(self_ds.pos, self_ds.vel, vel_sp, ref_pos, dt,
                                     neighbours=nbrs, est_ok=est_ok)
             vel_sp = sres['vel_sp']

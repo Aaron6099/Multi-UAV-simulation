@@ -43,6 +43,8 @@ class SafetyFilter:
                  escalate_frames=15,    # 连续违规多少帧升一级（50Hz→0.3s）
                  clear_frames=25,       # 连续正常多少帧降一级（0.5s）
                  relinquish_frames=50,  # HOLD 持续多少帧交还 PX4（1s）
+                 grace_frames=150,      # arm 后冷启动保护窗口（50Hz→3s）：期间只激活碰撞+NaN，
+                                        # 跳过高度/围栏检查（起飞穿过 min_alt 属正常，勿误触）
                  drone_id=0):
         self.max_track_dist = float(max_track_dist)
         self.max_alt = float(max_alt)
@@ -58,6 +60,7 @@ class SafetyFilter:
         self.escalate_frames = int(escalate_frames)
         self.clear_frames = int(clear_frames)
         self.relinquish_frames = int(relinquish_frames)
+        self.grace_frames = int(grace_frames)
         self.drone_id = int(drone_id)
 
         self.state = NORMAL
@@ -65,11 +68,13 @@ class SafetyFilter:
         self._ok_streak = 0        # 连续 severity==0 帧
         self._hold_streak = 0      # 连续处于 HOLD/更高 帧
         self._prev_vel = np.zeros(3)
+        self._frame = 0            # 总帧计数，用于 grace_frames 计时
 
     def reset(self):
         self.state = NORMAL
         self._bad_streak = self._ok_streak = self._hold_streak = 0
         self._prev_vel = np.zeros(3)
+        self._frame = 0
 
     def step(self, pos, vel, vel_sp, ref, dt,
              neighbours=None, est_ok=True):
@@ -85,6 +90,8 @@ class SafetyFilter:
         v = np.asarray(vel_sp, float).copy(); ref = np.asarray(ref, float)
         reasons = []
         severity = 0  # 0 ok, 1 degrade, 2 hold
+        in_grace = self._frame < self.grace_frames
+        self._frame += 1
 
         # 缺口5a：非有限 → 直接 HOLD（零速）
         if not np.all(np.isfinite(v)) or not np.all(np.isfinite(pos)):
@@ -94,8 +101,8 @@ class SafetyFilter:
         if not est_ok:
             v = np.zeros(3); severity = max(severity, 2); reasons.append('est_unhealthy')
 
-        # 缺口1：飞散围栏（偏离参考点 = track divergence；只刹扩大偏差的速度）
-        if np.all(np.isfinite(pos)) and np.all(np.isfinite(ref)):
+        # 缺口1：飞散围栏 + 高度围栏（冷启动窗口内跳过，避免起飞穿越 min_alt 误触）
+        if not in_grace and np.all(np.isfinite(pos)) and np.all(np.isfinite(ref)):
             dxy = pos[:2] - ref[:2]                    # 我相对"该在位置"的偏移
             r = float(np.linalg.norm(dxy))             # = 水平 track error
             if r > 1e-6:
@@ -163,8 +170,8 @@ class SafetyFilter:
             self.state = HOLD
         elif severity >= 1 and self._bad_streak >= self.escalate_frames:
             self.state = DEGRADED if self.state == NORMAL else self.state
-        elif self._ok_streak >= self.clear_frames:
-            self.state = NORMAL  # 清零回正常
+        elif self._ok_streak >= self.clear_frames and self.state != RELINQUISH:
+            self.state = NORMAL  # 清零回正常；RELINQUISH sticky，须外部 reset() 才可恢复
 
         if self.state in (HOLD, RELINQUISH):
             self._hold_streak += 1
@@ -220,12 +227,12 @@ def _selftest():
     check('正常态稳态指令透传 (state=NORMAL)', r['state'] == NORMAL and abs(r['vel_sp'][0] - 0.5) < 0.05)
 
     # 2) 围栏：在边界外且外向飞 → 外向分量被刹掉
-    sf = SafetyFilter(max_track_dist=8.0)
+    sf = SafetyFilter(max_track_dist=8.0, grace_frames=0)
     r = sf.step(pos=[9, 0, -5], vel=[1, 0, 0], vel_sp=[1.5, 0, 0], ref=ref, dt=dt)
     check('飞散外向速度被刹停 (vx<=0)', r['vel_sp'][0] <= 1e-6 and 'flyaway_breach' in str(r['reasons']))
 
     # 3) 围栏升级：持续越界 → 进 HOLD
-    sf = SafetyFilter(max_track_dist=8.0, escalate_frames=15)
+    sf = SafetyFilter(max_track_dist=8.0, escalate_frames=15, grace_frames=0)
     for _ in range(20):
         r = sf.step(pos=[9, 0, -5], vel=[1, 0, 0], vel_sp=[1.5, 0, 0], ref=ref, dt=dt)
     check('持续越界升级到 HOLD', r['state'] in (HOLD, RELINQUISH))
@@ -269,6 +276,24 @@ def _selftest():
     sf = SafetyFilter(max_speed=1.5, max_accel=100.0)
     r = sf.step(pos=[0, 0, -5], vel=[1.4, 0, 0], vel_sp=[5, 0, 0], ref=ref, dt=dt)
     check('水平速度硬帽 1.5', float(np.linalg.norm(r['vel_sp'][:2])) <= 1.5 + 1e-6)
+
+    # 11) RELINQUISH sticky：故障消失后连续 clear_frames 帧正常，状态仍应保持 RELINQUISH
+    sf = SafetyFilter(escalate_frames=5, relinquish_frames=10, clear_frames=5)
+    for _ in range(40):   # 先触发 RELINQUISH
+        sf.step(pos=[1, 0, -5], vel=[0, 0, 0], vel_sp=[1, 0, 0], ref=ref, dt=dt, est_ok=False)
+    for _ in range(20):   # 故障消失，连续正常帧（远超 clear_frames=5）
+        r = sf.step(pos=[1, 0, -5], vel=[0, 0, 0], vel_sp=[0.5, 0, 0], ref=ref, dt=dt, est_ok=True)
+    check('RELINQUISH sticky（故障消失后不自恢复）', r['state'] == RELINQUISH and r['publish'] is False)
+
+    # 12) grace_frames：冷启动期间 alt_low + flyaway 不触发，jerk/碰撞/NaN 仍激活
+    sf = SafetyFilter(grace_frames=50, d_emergency=1.2, max_track_dist=5.0)
+    r = sf.step(pos=[0, 0, 0.1], vel=[0, 0, 0],   # alt=−0.1m < min_alt, track=10m
+                vel_sp=[1, 0, 0], ref=[10, 0, 0], dt=dt)
+    check('grace 期 alt_low/flyaway 不触发(state=NORMAL)', r['state'] == NORMAL and 'fence_alt_low' not in str(r['reasons']))
+    # grace 期碰撞地板仍激活
+    r = sf.step(pos=[0, 0, -5], vel=[0, 0, 0], vel_sp=[1, 0, 0], ref=[0, 0, -5], dt=dt,
+                neighbours=[(np.array([1.0, 0, -5]), True)])
+    check('grace 期碰撞地板仍触发', 'collide_emerg' in str(r['reasons']))
 
     print(f'\n自测: {ok}/{total} 通过')
     return ok == total
