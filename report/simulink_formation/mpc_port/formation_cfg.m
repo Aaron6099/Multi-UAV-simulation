@@ -62,7 +62,7 @@ switch mode
     case 'line'                % 北向直线 v=1.5, d=20, 端点减速 a=0.5
         cfg.lead_v = 1.5; cfg.lead_d = 20.0; cfg.lead_dec = 0.5;
         cfg.T = 50;
-    case 'circle'              % R=10, v=1.5（≈一整圈 42s）
+    case 'circle'              % R=10, v=1.5（周期42s）；T=65s含收敛段+稳态圆周评估
         cfg.lead_R = 10.0; cfg.lead_v = 1.5;
         cfg.T = 65;
     otherwise
@@ -77,7 +77,7 @@ if strcmp(formation, 'cross5')
             cfg.lead_v = 1.0;          % S5: speed=1.0
             cfg.w_coll = 500.0;        % S5: limits.w_collision=500（防中心-臂入轨碰）
             cfg.t_start = 30.0;        % S5: ready_hold=30s（5 机成型收敛缓冲）
-            cfg.T = 100;               % 30s hold + ~63s 圆周 ≈ 一整圈
+            cfg.T = 93;                % 30s hold + 2π*10/1.0=62.8s ≈ 恰好1整圈
     end
 end
 end

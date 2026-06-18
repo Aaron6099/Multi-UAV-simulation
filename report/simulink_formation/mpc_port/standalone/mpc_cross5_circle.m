@@ -6,7 +6,7 @@ function res = mpc_cross5_circle()
 % ── 场景 ──────────────────────────────────────────────────────────────
 % 队形 : cross5（五机十字，5 机）
 % 运动 : circle（圆周）
-% 时长 : T = 100 s，成型等待 t_start = 30 s
+% 时长 : T = 93 s（= t_start 30 + 2π×10/1.0≈63s，恰好1整圈），成型等待 t_start = 30 s
 % cfg.lead_R = 10.0;      % 圆半径 m
 % cfg.lead_v = 1.0;      % 圆周速度 m/s  → 周期≈63s
 % cfg.w_coll = 500.0;    % 碰撞权重（cross5 circle 特殊）
@@ -58,7 +58,7 @@ function res = mpc_cross5_circle()
     cfg.lm         =  1e-4;
     cfg.kp_z       =  1.0;
     cfg.t_start    = 30.0;
-    cfg.T          = 100;
+    cfg.T          = 93;
     cfg.lead_R = 10.0;
     cfg.lead_v = 1.0;
 

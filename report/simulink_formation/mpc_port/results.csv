@@ -1,13 +1,13 @@
 formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict
 solo1,hover,0.0000,0.0000,0.0001,Inf,PASS
 solo1,line,0.0000,0.5605,0.0006,Inf,REVIEW
-solo1,circle,0.0000,1.1806,0.0008,Inf,REVIEW
 pair2,hover,0.0000,0.0000,0.0001,3.0000,PASS
 pair2,line,0.0000,0.5621,0.0006,3.0000,REVIEW
-pair2,circle,0.0000,1.1803,0.0008,3.0000,REVIEW
 trio3,hover,0.0000,0.0000,0.0001,5.1960,PASS
 trio3,line,0.0036,0.5651,0.0006,5.1830,REVIEW
-trio3,circle,0.0199,1.1845,0.0008,5.1152,REVIEW
 cross5,hover,0.0000,0.0000,0.0001,3.0000,PASS
 cross5,line,0.0010,0.2185,0.0003,2.9916,PASS
-cross5,circle,0.0014,0.1236,0.0001,2.9911,PASS
+cross5,circle,0.0015,0.1273,0.0001,2.9911,PASS
+solo1,circle,0.0000,1.1806,0.0008,Inf,REVIEW
+pair2,circle,0.0000,1.1803,0.0008,3.0000,REVIEW
+trio3,circle,0.0199,1.1845,0.0008,5.1152,REVIEW

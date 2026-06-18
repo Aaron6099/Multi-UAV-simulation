@@ -95,6 +95,17 @@ try
     fig = figure('Visible', 'off', 'Position', [50 50 1280 720]);
     subplot(2,2,1); hold on; grid on; axis equal
     cols = lines(n);
+    % 圆周模式：先画灰色参考圆（每机），严谨对照 SITL 轨迹
+    if strcmp(mode, 'circle')
+        th = linspace(0, 2*pi, 300);
+        R_c = cfg.lead_R;
+        for i = 1:n
+            cx_e = cfg.offsets(i,2);
+            cy_n = cfg.offsets(i,1) - R_c;
+            plot(cx_e + R_c*sin(th), cy_n + R_c*cos(th), '--', ...
+                 'Color', [0.75 0.75 0.75], 'LineWidth', 1.0);
+        end
+    end
     for i = 1:n
         plot(pos(:,2,i), pos(:,1,i), '-', 'Color', cols(i,:));
         plot(pos(end,2,i), pos(end,1,i), 'o', 'Color', cols(i,:), 'MarkerFaceColor', cols(i,:));

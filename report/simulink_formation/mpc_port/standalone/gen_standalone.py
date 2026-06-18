@@ -43,7 +43,7 @@ MODES = {
 
 CROSS5_OVERRIDES = {
     'line':   {'lead_v': 1.0},
-    'circle': {'lead_v': 1.0, 'w_coll': 500.0, 't_start': 30, 'T': 100},
+    'circle': {'lead_v': 1.0, 'w_coll': 500.0, 't_start': 30, 'T': 93},
 }
 
 # ── 算法函数（所有文件共用，内联到底部）────────────────────────────────────

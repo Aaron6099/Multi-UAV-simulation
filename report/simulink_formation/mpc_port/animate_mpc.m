@@ -9,6 +9,9 @@ addpath(here);
 evalin('base', sprintf('run(''%s'');', fullfile(fileparts(here), 'init.m')));
 
 cfg = formation_cfg(formation, mode);
+if strcmp(mode, 'circle')
+    cfg.T = max(cfg.T, 120);   % 动画延长显示稳态圆周，CSV 数据由 scenario_run 独立保存
+end
 global MPC_CFG %#ok<GVMIS>
 MPC_CFG = cfg;
 clear mpc_swarm_step                            % 复位 persistent
@@ -77,6 +80,14 @@ fprintf(['  steady: form_err=%.3fm  track_err=%.3fm  alt_err=%.3fm  ' ...
 figdir = fullfile(fileparts(fileparts(here)), 'figures');
 fig = figure('Visible','off','Position',[50 50 1280 720]);
 subplot(2,2,1); hold on; grid on; axis equal; cols = lines(n);
+if strcmp(mode, 'circle')
+    th_ref = linspace(0, 2*pi, 300); R_c = cfg.lead_R;
+    for i = 1:n
+        cx_e = cfg.offsets(i,2); cy_n = cfg.offsets(i,1) - R_c;
+        plot(cx_e + R_c*sin(th_ref), cy_n + R_c*cos(th_ref), '--', ...
+             'Color', [0.75 0.75 0.75], 'LineWidth', 1.0);
+    end
+end
 for i = 1:n
     plot(pos(:,2,i), pos(:,1,i), '-', 'Color', cols(i,:));
     plot(pos(end,2,i), pos(end,1,i), 'o', 'Color', cols(i,:), 'MarkerFaceColor', cols(i,:));
@@ -112,16 +123,36 @@ end
 % ── 屏幕实时 3D 动画（并存 MP4）─────────────────────────────────────────
 armR = 0.8; FPS = 20; SPEED = 2.0;
 dt = t(2) - t(1); stp = max(1, round(SPEED/FPS/dt));
-frames = 1:stp:L; TRAIL = round(15/dt);
+TRAIL = round(15/dt);
+if strcmp(mode, 'circle')
+    start_k = max(1, round((cfg.t_start + 50) / dt));  % 跳过收敛段
+    frames = start_k:stp:L;
+else
+    start_k = 1;
+    frames = 1:stp:L;
+end
 cc = lines(n);
 fig = figure('Name', sprintf('MPC %s %s 动画', formation, mode), ...
     'Position', [80 80 1100 720], 'Color', 'w');
 ax = axes(fig); hold(ax,'on'); grid(ax,'on'); box(ax,'on');
 xlabel(ax,'North [m]'); ylabel(ax,'East [m]'); zlabel(ax,'Alt [m]');
-view(ax, -35, 28); axis(ax,'equal');
 allN = pos(:,1,:); allE = pos(:,2,:);
+if strcmp(mode, 'circle')
+    view(ax, 0, 90); axis(ax,'equal');      % 俯视：圆周轨迹显示为正圆
+    zlabel(ax, '');
+else
+    view(ax, -35, 28); axis(ax,'equal');
+end
 xlim(ax,[min(allN(:))-2 max(allN(:))+2]); ylim(ax,[min(allE(:))-2 max(allE(:))+2]); zlim(ax,[0 7]);
 plot3(ax, lead(:,1), lead(:,2), -cfg.target_alt*ones(L,1), 'k--', 'LineWidth', 0.7);
+if strcmp(mode, 'circle')
+    th_ref = linspace(0, 2*pi, 300); R_c = cfg.lead_R;
+    for i = 1:n
+        cn = cfg.offsets(i,1) - R_c; ce = cfg.offsets(i,2);
+        plot3(ax, cn + R_c*cos(th_ref), ce + R_c*sin(th_ref), ...
+              -cfg.target_alt*ones(1,300), '--', 'Color', [0.75 0.75 0.75], 'LineWidth', 1.0);
+    end
+end
 hArm1 = gobjects(n,1); hArm2 = gobjects(n,1); hDot = gobjects(n,1); hTrail = gobjects(n,1);
 for d = 1:n
     hTrail(d) = plot3(ax,nan,nan,nan,'-','Color',[cc(d,:) 0.45],'LineWidth',1.0);
@@ -142,7 +173,7 @@ for k = frames
         set(hArm1(d),'XData',p(1)+[-armR armR],'YData',p(2)+[0 0],'ZData',[a a]);
         set(hArm2(d),'XData',p(1)+[0 0],'YData',p(2)+[-armR armR],'ZData',[a a]);
         set(hDot(d),'XData',p(1),'YData',p(2),'ZData',a);
-        i0 = max(1,k-TRAIL);
+        i0 = max(start_k,k-TRAIL);
         set(hTrail(d),'XData',pos(i0:k,1,d),'YData',pos(i0:k,2,d),'ZData',-pos(i0:k,3,d));
     end
     poly = zeros(n+1,3);
