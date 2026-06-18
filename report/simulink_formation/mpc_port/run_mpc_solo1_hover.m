@@ -1,6 +1,7 @@
-%% run_mpc_solo1_hover.m — 真机部署对应件: solo1(1机) × hover
-% 完整移植 ROS mpc_node 的 MPC(双积分 OCP + GN-RTI + 碰撞/编队残差 + 邻居
-% 预测轨迹交换)在 Simulink 6DOF+PID 被控对象上的闭环验证。
-% 真机测 solo1 hover 前先跑本文件确认算法支撑(VERDICT: PASS)。
+%% run_mpc_solo1_hover.m — 1机 × 悬停
+% 队形: solo1，birth=[0,0,0]，无邻居约束
+% 运动: hover，原地悬停，T=30s
+% MPC:  N=30，dt=0.05s，q_pos=4，q_vel=2，d_safe=1.5m
+% 预期: PASS（track_err≈0m，alt_err<0.001m，悬停稳定）
 addpath(fileparts(mfilename('fullpath')));
 scenario_run('solo1', 'hover');

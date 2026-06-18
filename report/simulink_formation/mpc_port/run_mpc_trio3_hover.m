@@ -1,6 +1,7 @@
-%% run_mpc_trio3_hover.m — 真机部署对应件: trio3(3机) × hover
-% 完整移植 ROS mpc_node 的 MPC(双积分 OCP + GN-RTI + 碰撞/编队残差 + 邻居
-% 预测轨迹交换)在 Simulink 6DOF+PID 被控对象上的闭环验证。
-% 真机测 trio3 hover 前先跑本文件确认算法支撑(VERDICT: PASS)。
+%% run_mpc_trio3_hover.m — 3机 × 悬停
+% 队形: trio3，等边三角，birth=[3,0,0; -1.5,2.598,0; -1.5,-2.598,0]，d*≈5.196m
+% 运动: hover，原地悬停，T=30s
+% MPC:  N=30，dt=0.05s，q_pos=4，q_vel=2，d_safe=1.5m
+% 预期: PASS（form_err≈0m，min_sp≈5.196m，三机悬停稳定）
 addpath(fileparts(mfilename('fullpath')));
 scenario_run('trio3', 'hover');

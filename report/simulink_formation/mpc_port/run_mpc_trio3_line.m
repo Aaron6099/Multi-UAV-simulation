@@ -1,6 +1,7 @@
-%% run_mpc_trio3_line.m — 真机部署对应件: trio3(3机) × line
-% 完整移植 ROS mpc_node 的 MPC(双积分 OCP + GN-RTI + 碰撞/编队残差 + 邻居
-% 预测轨迹交换)在 Simulink 6DOF+PID 被控对象上的闭环验证。
-% 真机测 trio3 line 前先跑本文件确认算法支撑(VERDICT: REVIEW)。
+%% run_mpc_trio3_line.m — 3机 × 直线
+% 队形: trio3，等边三角，birth=[3,0,0; -1.5,2.598,0; -1.5,-2.598,0]，d*≈5.196m
+% 运动: line，北向直线，v=1.5m/s，d=20m，端点减速 a=0.5m/s²，T=50s
+% MPC:  N=30，dt=0.05s，q_pos=4，q_vel=2，d_safe=1.5m
+% 预期: REVIEW（track_err≈0.57m，共模速度滞后，form_err≈0.004m，队形完好）
 addpath(fileparts(mfilename('fullpath')));
 scenario_run('trio3', 'line');
