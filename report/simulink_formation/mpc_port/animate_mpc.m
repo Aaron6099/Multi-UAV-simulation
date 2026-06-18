@@ -137,12 +137,7 @@ fig = figure('Name', sprintf('MPC %s %s 动画', formation, mode), ...
 ax = axes(fig); hold(ax,'on'); grid(ax,'on'); box(ax,'on');
 xlabel(ax,'North [m]'); ylabel(ax,'East [m]'); zlabel(ax,'Alt [m]');
 allN = pos(:,1,:); allE = pos(:,2,:);
-if strcmp(mode, 'circle')
-    view(ax, 0, 90); axis(ax,'equal');      % 俯视：圆周轨迹显示为正圆
-    zlabel(ax, '');
-else
-    view(ax, -35, 28); axis(ax,'equal');
-end
+view(ax, -35, 28); axis(ax,'equal');
 xlim(ax,[min(allN(:))-2 max(allN(:))+2]); ylim(ax,[min(allE(:))-2 max(allE(:))+2]); zlim(ax,[0 7]);
 plot3(ax, lead(:,1), lead(:,2), -cfg.target_alt*ones(L,1), 'k--', 'LineWidth', 0.7);
 if strcmp(mode, 'circle')
