@@ -11,6 +11,7 @@
 | `run_mpc_solo1_hover/line/circle.m` | 1 | 悬停/直线/圆周 | 单机首飞三连 |
 | `run_mpc_pair2_hover/line/circle.m` | 2 | 同上 | 双机编队 |
 | `run_mpc_trio3_hover/line/circle.m` | 3 | 同上 | 三机编队 |
+| `run_mpc_cross5_hover/line/circle.m` | 5 | 同上 | 五机十字编队 |
 
 真机测哪个场景，先跑对应文件确认 `VERDICT: PASS/REVIEW`。
 输出：`report/figures/mpc_<formation>_<mode>.png` + 本目录 `results.csv`。
