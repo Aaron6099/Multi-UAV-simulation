@@ -125,8 +125,9 @@ armR = 0.8; FPS = 20; SPEED = 2.0;
 dt = t(2) - t(1); stp = max(1, round(SPEED/FPS/dt));
 TRAIL = round(15/dt);
 if strcmp(mode, 'circle')
-    start_k = max(1, round((cfg.t_start + 50) / dt));  % 跳过收敛段
-    frames = start_k:stp:L;
+    takeoff_end = max(1, round(cfg.t_start / dt));      % 起飞段结束（t_start 前）
+    start_k     = max(1, round((cfg.t_start + 50) / dt)); % 稳态圆周开始
+    frames = [1:stp:takeoff_end, start_k:stp:L];       % 起飞 + 稳态圆周，跳过收敛螺旋
 else
     start_k = 1;
     frames = 1:stp:L;
@@ -168,7 +169,7 @@ for k = frames
         set(hArm1(d),'XData',p(1)+[-armR armR],'YData',p(2)+[0 0],'ZData',[a a]);
         set(hArm2(d),'XData',p(1)+[0 0],'YData',p(2)+[-armR armR],'ZData',[a a]);
         set(hDot(d),'XData',p(1),'YData',p(2),'ZData',a);
-        i0 = max(start_k,k-TRAIL);
+        i0 = max(1 + (k>=start_k)*(start_k-1), k-TRAIL); % 起飞段从1，稳态段从start_k
         set(hTrail(d),'XData',pos(i0:k,1,d),'YData',pos(i0:k,2,d),'ZData',-pos(i0:k,3,d));
     end
     poly = zeros(n+1,3);
