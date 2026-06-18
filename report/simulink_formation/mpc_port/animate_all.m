@@ -1,7 +1,7 @@
 %% animate_all.m — 12 个场景全部出动画(+PNG+results.csv 去重追加)
 % 逐个调 animate_mpc：弹窗实时播放 + 另存 ../figures/mpc_<f>_<m>_anim.mp4。
 % 幂等：PNG 确定性重生成、results.csv 已有行自动跳过。
-% 全部 12 个约 15~18 min(每场景仿真 ~75-80s + 渲染；cross5 circle T=100s 较长)。
+% 全部 12 个约 15~18 min(每场景仿真 ~75-80s + 渲染；cross5 circle T=93s 较长)。
 % 只想补缺动画的场景：把下面 combos 改成对应行即可。
 combos = { ...
     'solo1','hover'; 'solo1','line'; 'solo1','circle'; ...
