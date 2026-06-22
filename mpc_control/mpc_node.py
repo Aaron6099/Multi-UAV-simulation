@@ -5,6 +5,8 @@ import random
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import (
     QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy,
 )
@@ -493,26 +495,32 @@ class MpcControllerNode(Node):
         self._nav_state   = 0
         self._arm_offboard_confirmed = False
         self._cmd_retry_counter = 0   # frames since startup finished
+        # 控制定时器与所有订阅分属不同回调组 + MultiThreadedExecutor：
+        # 否则单线程 executor 下 50Hz 控制定时器会被 9 邻居+leader+位置订阅的回调洪流
+        # 偶发拖过 0.5s → offboard setpoint 断流 → PX4 报 offboard_control_signal_lost → Hold。
+        # 共享态(ds.pos/vel、leader_pos、peer_predictions)均为原子 rebind，跨线程读最多取到旧一帧，安全。
+        self._cb_control = MutuallyExclusiveCallbackGroup()
+        self._cb_subs = MutuallyExclusiveCallbackGroup()
         self.create_subscription(
             VehicleStatus,
             topic_for_drone(self.drone_id, 'out/vehicle_status'),
-            self._on_vehicle_status, qos,
+            self._on_vehicle_status, qos, callback_group=self._cb_subs,
         )
         self.create_subscription(
             VehicleAttitude,
             topic_for_drone(self.drone_id, 'out/vehicle_attitude'),
-            self.on_self_attitude, qos,
+            self.on_self_attitude, qos, callback_group=self._cb_subs,
         )
         self.create_subscription(
             VehicleLocalPosition,
             topic_for_drone(self.drone_id, 'out/vehicle_local_position'),
-            self._make_pos_callback(self.drone_id), qos,
+            self._make_pos_callback(self.drone_id), qos, callback_group=self._cb_subs,
         )
         for j in self.neighbours:
             self.create_subscription(
                 VehicleLocalPosition,
                 topic_for_drone(j, 'out/vehicle_local_position'),
-                self._make_pos_callback(j), qos,
+                self._make_pos_callback(j), qos, callback_group=self._cb_subs,
             )
         leader_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -521,6 +529,7 @@ class MpcControllerNode(Node):
         )
         self.create_subscription(
             Float64MultiArray, '/leader/state', self.on_leader_state, leader_qos,
+            callback_group=self._cb_subs,
         )
         # Tier2: 全员高度基准 —— drone0 广播当前 ref_alt，各机据此 re-sync world_birth_z
         datum_qos = QoSProfile(
@@ -534,6 +543,7 @@ class MpcControllerNode(Node):
         )
         self.create_subscription(
             Float64, '/swarm/alt_datum', self._on_alt_datum, datum_qos,
+            callback_group=self._cb_subs,
         )
         self.pub_predicted = self.create_publisher(
             Float64MultiArray,
@@ -549,9 +559,13 @@ class MpcControllerNode(Node):
             self.create_subscription(
                 Float64MultiArray,
                 mpc_topic_for_drone(j, 'predicted_trajectory'),
-                self._make_pred_callback(j), 10,
+                self._make_pred_callback(j), 10, callback_group=self._cb_subs,
             )
-        self.timer = self.create_timer(1.0 / self.control_hz, self.control_loop)
+        # 控制定时器单独成组 → 与订阅并行、永不被回调洪流饿死
+        self.timer = self.create_timer(
+            1.0 / self.control_hz, self.control_loop,
+            callback_group=self._cb_control,
+        )
 
         self.get_logger().info(
             f'mpc_controller drone {self.drone_id} ready. '
@@ -816,6 +830,10 @@ class MpcControllerNode(Node):
                 m.data = float(self._datum_ref_alt)
                 self.pub_alt_datum.publish(m)
         if not self._alt_resync_enable or self._datum_ref_alt is None:
+            return
+        # 自机离地 < 1m 时不做 resync：防起飞期 world_birth_z 误漂导致安全层误判高度
+        self_ds_alt = self.drone_states[self.drone_id]
+        if not self_ds_alt.received or (-self_ds_alt.pos[2]) < 1.0:
             return
         step = max(0.0, self._alt_resync_rate * dt)
         for idx in [self.drone_id] + list(self.neighbours):
@@ -1156,11 +1174,16 @@ class MpcControllerNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MpcControllerNode()
+    # 多线程 executor：控制定时器(自己的回调组)与订阅(另一组)并行，
+    # 保证 50Hz offboard 心跳/ setpoint 不被订阅回调拖延 → 不丢 offboard 信号。
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
