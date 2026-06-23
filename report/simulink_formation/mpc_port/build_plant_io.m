@@ -1,6 +1,6 @@
 function build_plant_io(force)
 %BUILD_PLANT_IO 由母版 simple_vel_pid_4rotors 派生 IO 化被控对象 uav_plant_io.slx
-%   Inport: vx_cmd / vy_cmd / vz_cmd（替换 x / y / Step2 三个指令源）
+%   Inport: vx_cmd / vy_cmd / vz_cmd / yaw_cmd（替换 x / y / Step2 及 pid_velocity/yaw_d）
 %   Outport: Xe(=6DOF Port2) / Ve(=6DOF Port1)
 % 动画注掉。原件不动（save_system 另存）。
 if nargin < 1, force = false; end
@@ -31,6 +31,22 @@ for i = 1:3
         'Port', num2str(i), 'Position', [40, 60+70*i, 70, 75+70*i]);
     add_line(mdl, [names{i} '/1'], sprintf('Mux4/%d', i), 'autorouting', 'on');
 end
+
+% yaw_cmd → Inport 4，替换 pid_velocity/yaw_d（原为子系统内部 Inport，
+% 外层 Mux4 只有3路，yaw_d 直接从顶层穿进去）
+yaw_blk = [mdl '/pid_velocity/yaw_d'];
+ph_yaw = get_param(yaw_blk, 'PortHandles');
+ln_yaw = get_param(ph_yaw.Outport(1), 'Line');
+if ln_yaw ~= -1, delete_line(ln_yaw); end
+delete_block(yaw_blk);
+% 在顶层加 yaw_cmd Inport，通过 Goto/From 穿入子系统
+add_block('simulink/Sources/In1', [mdl '/yaw_cmd'], ...
+    'Port', '4', 'Position', [40, 290, 70, 305]);
+add_block('simulink/Signal Routing/Goto', [mdl '/Goto_yaw'], ...
+    'GotoTag', [mdl '_yaw_cmd'], 'Position', [120, 290, 200, 305]);
+add_line(mdl, 'yaw_cmd/1', 'Goto_yaw/1', 'autorouting', 'on');
+add_block('simulink/Signal Routing/From', [mdl '/pid_velocity/yaw_d'], ...
+    'GotoTag', [mdl '_yaw_cmd'], 'Position', [40, 200, 120, 215]);
 
 % 6DOF Port2=Xe, Port1=Ve → Outport（在既有连线上分支）
 blk6dof = [mdl '/6DOF (Euler Angles)'];
