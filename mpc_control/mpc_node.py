@@ -292,6 +292,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('alt_resync_rate', 0.05)       # m/s，world_birth_z 逼近限速(防 MPC z 跳)
         self.declare_parameter('alt_ref_filter_alpha', 0.05)  # 当前 ref_alt 的 EMA 系数
         self.declare_parameter('alt_resync_max', 3.0)         # m，单机 z 偏移安全上限
+        # 悬停期一次性高度 trim：各机 home ref_alt 不同 → 同控 -5 真高散；用 ref_alt 与
+        # drone0 datum 之差偏调 target_alt(而非 world_birth_z，避开 alt_resync 撞机根因)，
+        # 使各机收敛到同一绝对海拔=同真高；起飞前(leader 起动)冻结，圆周中不再变。
+        self.declare_parameter('alt_trim_enable', False)
+        self.declare_parameter('alt_trim_max', 2.0)           # m，trim 安全上限
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -302,6 +307,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('d_safe', 1.2)
         self.declare_parameter('w_collision', 200.0)
         self.declare_parameter('w_formation', 0.5)
+        # 候选①：XY 位置反馈（前馈 + 有界 P）。kp=0 → 纯前馈(现状/1c4bc5a 行为)；
+        # >0 时叠加饱和限幅的位置纠偏，抓住运动时碰撞约束推离槽位的漂移、防发散。
+        # cap 限幅避免无阻尼比例环的圆周震荡。非 acados 烤死参数，改后无需清缓存。
+        self.declare_parameter('vel_xy_kp', 0.0)
+        self.declare_parameter('vel_xy_cap', 0.8)
         self.declare_parameter('acados_build_dir', '/tmp/acados_di_mpc')
         # P2 故障注入：邻居预测轨迹的通信劣化（S16；0=关闭）。
         # delay 注入后走既有时间对齐路径（latency 平移），dropout 直接丢弃消息——
@@ -355,6 +365,8 @@ class MpcControllerNode(Node):
         self.target_alt = float(self.get_parameter('target_alt').value)
         self.max_speed  = float(self.get_parameter('max_speed').value)
         self.max_climb  = float(self.get_parameter('max_climb').value)
+        self.vel_xy_kp  = float(self.get_parameter('vel_xy_kp').value)
+        self.vel_xy_cap = float(self.get_parameter('vel_xy_cap').value)
         self.max_accel  = float(self.get_parameter('max_accel').value)
         self.control_hz = float(self.get_parameter('control_hz').value)
         self.neighbour_timeout = float(self.get_parameter('neighbour_timeout').value)
@@ -425,6 +437,11 @@ class MpcControllerNode(Node):
         self._alt_resync_rate   = float(self.get_parameter('alt_resync_rate').value)
         self._alt_ref_alpha     = float(self.get_parameter('alt_ref_filter_alpha').value)
         self._alt_resync_max    = float(self.get_parameter('alt_resync_max').value)
+        # 悬停期高度 trim 状态
+        self._alt_trim_enable = bool(self.get_parameter('alt_trim_enable').value)
+        self._alt_trim_max    = float(self.get_parameter('alt_trim_max').value)
+        self._alt_trim        = 0.0     # m，加到 target_alt 的世界系 z 偏调（NED）
+        self._alt_trim_frozen = False   # leader 起动后冻结，圆周中不再变
         # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
         self._valid_streak = [0] * self.num_drones
         # 校准滚动窗口：最近若干帧的 local (x,y,z)，用于稳定性门控
@@ -620,12 +637,25 @@ class MpcControllerNode(Node):
                 # 已用 GPS 海拔差校准，z_reset 后必须同步补偿，否则 MPC 世界坐标系
                 # 中 ds.pos 会跳变，导致各机高度不一致。
                 if msg.z_reset_counter > self._prev_z_reset[drone_idx]:
-                    self.world_birth[drone_idx, 2] -= float(msg.delta_z)
-                    self.get_logger().warn(
-                        f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
-                        f'delta={msg.delta_z:+.2f}; '
-                        f'world_birth_z → {self.world_birth[drone_idx,2]:+.2f}'
-                    )
+                    # 起飞期(离地<1m)的 z_reset 多为 EKF 沉降/气压计settle，把跳变补进
+                    # world_birth_z 会将一次性偏移永久烤成真高误差(d5 起飞期 reset#3
+                    # delta=-0.76 → 真高永久偏 +0.76m)。与 alt_resync 离地门控(:843)同
+                    # 思路：近地 reset 只推进计数器、不补偿；飞行中 reset 仍补偿以保世界系
+                    # 连续、不扰编队几何。msg 为 drone_idx 本机 local_position，-z=离地高度。
+                    alt_agl = -float(msg.z)
+                    if alt_agl < 1.0:
+                        self.get_logger().warn(
+                            f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
+                            f'delta={msg.delta_z:+.2f}; 离地{alt_agl:.2f}m<1m(起飞期)'
+                            f'→ 不补偿 world_birth_z(保持 {self.world_birth[drone_idx,2]:+.2f})'
+                        )
+                    else:
+                        self.world_birth[drone_idx, 2] -= float(msg.delta_z)
+                        self.get_logger().warn(
+                            f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
+                            f'delta={msg.delta_z:+.2f}; '
+                            f'world_birth_z → {self.world_birth[drone_idx,2]:+.2f}'
+                        )
                     self._prev_z_reset[drone_idx] = msg.z_reset_counter
 
             # --- one-time world_birth calibration, GATED on EKF convergence ---
@@ -817,6 +847,36 @@ class MpcControllerNode(Node):
     def _on_alt_datum(self, msg):
         self._datum_ref_alt = float(msg.data)
 
+    def _eff_target_alt(self):
+        """有效目标高度（世界系 NED）= 基准 target_alt + 悬停期标定的 alt_trim。
+        alt_trim=0 时等价原行为。"""
+        return self.target_alt + self._alt_trim
+
+    def _update_alt_trim(self):
+        """悬停期：用本机 ref_alt 与 drone0 datum 之差偏调 target_alt，使各机收敛到
+        同一绝对海拔（=同真高）。leader 起动即冻结，圆周中不再变。只调设定点、不动
+        world_birth_z，故不扰碰撞/编队几何（避开 alt_resync 撞机根因）。"""
+        if not self._alt_trim_enable or self._alt_trim_frozen:
+            return
+        # leader 起动 → 冻结当前 trim
+        if float(np.linalg.norm(self.leader_vel)) > 0.05:
+            self._alt_trim_frozen = True
+            self.get_logger().info(
+                f'[d{self.drone_id}] alt_trim 冻结 @ {self._alt_trim:+.2f}m（leader 起动）')
+            return
+        my_ref = self._ref_alt_now[self.drone_id]
+        if (self._datum_ref_alt is None or my_ref is None
+                or not self._pos_calibrated[self.drone_id]):
+            return
+        # 离地<1m（起飞期）不调，防地面暂态
+        self_ds = self.drone_states[self.drone_id]
+        if not self_ds.received or (-self_ds.pos[2]) < 1.0:
+            return
+        raw = float(np.clip(my_ref - self._datum_ref_alt,
+                            -self._alt_trim_max, self._alt_trim_max))
+        # 低通收敛，防 ref_alt 噪声抖动
+        self._alt_trim = 0.9 * self._alt_trim + 0.1 * raw
+
     def _resync_world_birth_z(self, dt):
         """Tier2: 把(已标定)机的 world_birth_z 限速拉向 birth_z + (datum - 当前ref_alt)。
         ref_alt 连续温漂不触发 z_reset，:507 补不到；这里持续纠偏，且限速使 MPC 只看到
@@ -859,6 +919,7 @@ class MpcControllerNode(Node):
             dt = 1.0 / self.control_hz
 
         self._resync_world_birth_z(dt)   # Tier2: 补偿 ref_alt 连续温漂
+        self._update_alt_trim()          # 悬停期高度 trim（leader 起动前标定，之后冻结）
 
         # 使用当前姿态 yaw，避免起飞时强制转向正北
         yaw_hold = self.attitude_yaw if self.attitude_received else 0.0
@@ -973,13 +1034,19 @@ class MpcControllerNode(Node):
         vel_correction = np.clip(pos_err_vec * Kp_pos, -self.max_speed, self.max_speed)
 
         # Blend: MPC velocity + position correction
-        # 横向：直接用 MPC 优化速度。原先叠加 0.5·Kp·pos_err 的外层纯比例 P 环，
-        # 在已最优的 MPC 上再套一层无阻尼比例修正 → 僚机过冲、圆周震荡。MPC 内部
-        # 已含 q_pos/q_vel 与速度前馈(ref 的 vel+acc·t)，横向跟踪交给它即可。
+        # 横向：MPC 优化速度前馈 + 候选①可选的饱和限幅位置 P。原先叠加 0.5·Kp·pos_err
+        # 的外层「无限幅」比例环 → 僚机过冲、圆周震荡(1c4bc5a 删之)。这里改为有界 P：
+        # vel_xy_kp=0 时退回纯前馈(等价 1c4bc5a)；>0 时纠偏被 vel_xy_cap 限幅，
+        # 抓住密集 grid 运动中碰撞约束推离槽位的漂移、防发散，又不致无阻尼震荡。
         # 垂直：保留纯 P(高度保持，与横向解耦，不引起震荡)。
         vel_sp = np.zeros(3)
         vel_sp[0] = pred_vel[0]
         vel_sp[1] = pred_vel[1]
+        if self.vel_xy_kp > 0.0:
+            corr_xy = np.clip(pos_err_vec[:2] * self.vel_xy_kp,
+                              -self.vel_xy_cap, self.vel_xy_cap)
+            vel_sp[0] += corr_xy[0]
+            vel_sp[1] += corr_xy[1]
         vel_sp[2] = vel_correction[2]  # pure P-controller for z (altitude hold)
 
         # Clip to limits
@@ -1059,7 +1126,7 @@ class MpcControllerNode(Node):
             t = k * self.mpc_dt
             # 二阶预测：pos + vel*t + 0.5*acc*t²（圆周运动时捕捉向心加速度）
             pos = leader_pos_safe + leader_vel_safe * t + 0.5 * leader_acc_safe * t * t + self.my_offset
-            pos[2] = self.target_alt
+            pos[2] = self._eff_target_alt()
             x_ref[k, 0:3] = pos
             # 速度前馈也随加速度变化：vel(t) = vel(0) + acc*t
             vel_t = leader_vel_safe[:2] + leader_acc_safe[:2] * t
@@ -1125,9 +1192,9 @@ class MpcControllerNode(Node):
         """当前 XY 保持（有位置时）或出生点 XY，高度收敛到目标高度，均为世界系 NED。"""
         ds = self.drone_states[self.drone_id]
         if ds.received:
-            return np.array([ds.pos[0], ds.pos[1], self.target_alt])
+            return np.array([ds.pos[0], ds.pos[1], self._eff_target_alt()])
         birth = self.world_birth[self.drone_id]
-        return np.array([birth[0], birth[1], self.target_alt])
+        return np.array([birth[0], birth[1], self._eff_target_alt()])
 
     def publish_position_setpoint(self, pos_world_ned, vel_ff_world_ned, yaw):
         """位置闭环 + 速度前馈（PX4 官方推荐：position≠NaN时，velocity作前馈项）。

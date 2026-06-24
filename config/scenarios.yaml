@@ -33,6 +33,8 @@ defaults:
   d_safe:                    1.5
   w_collision:             200.0
   w_formation:               0.5
+  vel_xy_kp:                 0.0    # 候选①：XY 位置反馈增益。0=纯前馈(现状)；>0 开有界 P 防发散
+  vel_xy_cap:                0.8    # 位置纠偏限幅 m/s，防无阻尼圆周震荡
   # SITL 三机同一 Gazebo 地面：关闭 alt 跨机校准。各机 EKF 的 ref_alt(GPS海拔基准)
   # 差 1-1.5m 纯属仿真噪声，非真实高度差；开着会让各机飞到不同物理高度(高度参差)。
   # 关闭后各机 world_birth_z=birth_z=0，各自控到离地 target_alt，三机同高。
@@ -111,10 +113,11 @@ scenarios:
   # 实测入轨 min_spacing 2.87m、0 违规、0 fallback（修复前中心-臂曾掉到 0.03m）。
   S5_cross5_circle: {formation: cross5, leader: {mode: circle, speed: 1.0, radius: 10.0, yaw_mode: center, ready_hold: 30.0, ready_pos_err: 0.3}, limits: {w_collision: 500.0}}
   S6_cross5_hover:  {formation: cross5, leader: {mode: hover}}
+  S7_grid9_hover:   {formation: grid9,  leader: {mode: hover}}
   S7_grid9_line:    {formation: grid9,  leader: {mode: line,   speed: 0.5, max_distance: 12.0, ready_hold: 30.0, ready_pos_err: 0.3},
                      thresholds: {solve_ms: 15.0}}
-  S8_grid9_circle:  {formation: grid9,  leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center},
-                     thresholds: {solve_ms: 15.0}}
+  S8_grid9_circle:  {formation: grid9,  leader: {mode: circle, speed: 0.5, radius: 10.0, yaw_mode: center, ready_hold: 30.0, ready_pos_err: 0.3},
+                     thresholds: {solve_ms: 15.0}, limits: {safety_max_track_dist: 25.0, w_collision: 200.0, alt_resync_enable: false, vel_xy_kp: 0.5, vel_xy_cap: 0.8, alt_trim_enable: true}}
 
   # ── EXT（扫自变量，加强稳定性论证）──
   S9_star5_line:    {formation: star5,  leader: {mode: line,   speed: 1.0, max_distance: 20.0}}
