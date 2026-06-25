@@ -1,18 +1,39 @@
-function res = scenario_run(formation, mode)
+function res = scenario_run(formation, mode, ctrl, ff)
 %SCENARIO_RUN 单场景闭环验证：建模 → 仿真 → 指标 → verdict → 图
-%   res = scenario_run('pair2','line')
+%   res = scenario_run('pair2','line')                   % 默认 MPC
+%   res = scenario_run('pair2','line','consensus')       % 一致性(带 leader 速度前馈)
+%   res = scenario_run('pair2','line','consensus',false) % 一致性公平基线(去前馈 ablation)
+% ctrl: 'mpc'(默认) | 'consensus'；ff: 仅 consensus 用，true(默认)带前馈 / false 公平基线。
+% 两者同植物/同 leader/同指标，仅控制器不同。
 % 真机部署映射：每个 run_mpc_<formation>_<mode>.m 入口对应一个真机检验单元。
+if nargin < 3, ctrl = 'mpc'; end
+if nargin < 4, ff = true; end
 here = fileparts(mfilename('fullpath'));
 addpath(here);
 % 被控对象物理参数必须进 base 工作区（模型变量解析）
 evalin('base', sprintf('run(''%s'');', fullfile(fileparts(here), 'init.m')));
 
-cfg = formation_cfg(formation, mode);
-global MPC_CFG
-MPC_CFG = cfg;
-clear mpc_swarm_step                            % 复位 persistent（多场景连跑）
-
-mdl = build_swarm_model(cfg.n, false);
+switch lower(ctrl)
+    case 'mpc'
+        cfg = formation_cfg(formation, mode);
+        global MPC_CFG %#ok<TLEV>
+        MPC_CFG = cfg;
+        clear mpc_swarm_step                    % 复位 persistent（多场景连跑）
+        mdl = build_swarm_model(cfg.n, false);
+        tag = 'MPC'; fpre = 'mpc'; csvname = 'results.csv';
+    case 'consensus'
+        cfg = consensus_cfg(formation, mode, ff);
+        global CONS_CFG %#ok<TLEV>
+        CONS_CFG = cfg;
+        clear consensus_swarm_step              % 复位 persistent
+        mdl = build_consensus_model(cfg.n, false);
+        sfx = cfg.suffix;                       % '' 带前馈 | '_noff' 公平基线
+        tag = ['CONS' upper(strrep(sfx, '_', ''))];
+        fpre = ['cons' sfx];
+        csvname = ['results_consensus' sfx '.csv'];
+    otherwise
+        error('未知 ctrl "%s"（应为 mpc | consensus）', ctrl);
+end
 if ~bdIsLoaded(mdl), load_system(fullfile(here, [mdl '.slx'])); end
 
 % 出生位置注入（地面 z=0，与 SITL 一致；MPC 自行爬升到 target_alt）
@@ -22,7 +43,7 @@ for i = 1:cfg.n
 end
 set_param(mdl, 'StopTime', num2str(cfg.T));
 
-fprintf('=== MPC %s %s (%d 机, T=%ds) 仿真中...\n', formation, mode, cfg.n, cfg.T);
+fprintf('=== %s %s %s (%d 机, T=%ds) 仿真中...\n', tag, formation, mode, cfg.n, cfg.T);
 tic; out = sim(mdl); fprintf('  仿真完成 %.1fs\n', toc);
 bdclose(mdl);   % xme_0 已改 → 丢弃改动关闭，下个场景重新 load+注入
 
@@ -112,7 +133,7 @@ try
     end
     plot(lead(:,2), lead(:,1), 'k--');
     xlabel('East [m]'); ylabel('North [m]');
-    title(sprintf('MPC %s %s — 俯视轨迹', formation, mode));
+    title(sprintf('%s %s %s — 俯视轨迹', tag, formation, mode));
     subplot(2,2,2); plot(t, form_err); grid on
     xlabel('t [s]'); ylabel('form\_err [m]'); title('编队误差(邻居对均值)');
     subplot(2,2,3); plot(t, alt); yline(cfg.target_alt, 'k--'); grid on
@@ -127,7 +148,7 @@ try
     xlabel('t [s]');
     fig_dir = fullfile(fileparts(fileparts(here)), 'figures');
     if ~exist(fig_dir, 'dir'), mkdir(fig_dir); end
-    png = fullfile(fig_dir, sprintf('mpc_%s_%s.png', formation, mode));
+    png = fullfile(fig_dir, sprintf('%s_%s_%s.png', fpre, formation, mode));
     exportgraphics(fig, png, 'Resolution', 120);
     close(fig);
     fprintf('  图: %s\n', png);
@@ -137,7 +158,7 @@ catch ME
 end
 
 % 结果累积 CSV（去重：同 formation+mode 已存在则覆盖，防重跑产生重复行）
-csv = fullfile(here, 'results.csv');
+csv = fullfile(here, csvname);
 hdr = 'formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict';
 newrow = sprintf('%s,%s,%.4f,%.4f,%.4f,%.4f,%s', formation, mode, ...
     m_form, m_track, m_alt, m_minsp, verdict);

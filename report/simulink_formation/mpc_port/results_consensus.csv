@@ -1,0 +1,13 @@
+formation,mode,form_err_m,track_err_m,alt_err_m,min_sp_m,verdict
+solo1,hover,0.0000,0.0000,0.0001,Inf,PASS
+solo1,line,0.0000,0.0250,0.0011,Inf,PASS
+solo1,circle,0.0000,0.0690,0.0007,Inf,PASS
+pair2,hover,0.0000,0.0000,0.0001,3.0000,PASS
+pair2,line,0.0000,0.0250,0.0011,3.0000,PASS
+pair2,circle,0.0000,0.0690,0.0007,3.0000,PASS
+trio3,hover,0.0000,0.0000,0.0001,5.1960,PASS
+trio3,line,0.0000,0.0250,0.0011,5.1960,PASS
+trio3,circle,0.0000,0.0690,0.0007,5.1960,PASS
+cross5,hover,0.0000,0.0000,0.0001,3.0000,PASS
+cross5,line,0.0000,0.0171,0.0005,3.0000,PASS
+cross5,circle,0.0000,0.0282,0.0003,3.0000,PASS

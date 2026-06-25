@@ -1,0 +1,13 @@
+formation,mode,form_mpc,form_cons,track_mpc,track_cons,vd_mpc,vd_cons
+solo1,hover,0,0,0,0,PASS,PASS
+solo1,line,0,0,0.5605,0.025,REVIEW,PASS
+pair2,line,0,0,0.5621,0.0409,REVIEW,PASS
+trio3,hover,0,0,0,0,PASS,PASS
+trio3,line,0.0036,0,0.5651,0.056,REVIEW,PASS
+cross5,hover,0,0,0,0,PASS,PASS
+cross5,line,0.001,0.0054,0.2185,0.0437,PASS,PASS
+cross5,circle,0.0015,0.0085,0.1273,0.0809,PASS,PASS
+solo1,circle,0,0,1.1806,0.069,REVIEW,PASS
+trio3,circle,0.0199,0,1.1845,0.1868,REVIEW,PASS
+pair2,circle,0,0,1.1803,0.1318,REVIEW,PASS
+pair2,hover,0,0,0,0,PASS,PASS
