@@ -1,0 +1,13 @@
+diff --git a/Tools/simulation/gz/worlds/default.sdf b/Tools/simulation/gz/worlds/default.sdf
+index 4b6f384002..9762f05eda 100644
+--- a/Tools/simulation/gz/worlds/default.sdf
++++ b/Tools/simulation/gz/worlds/default.sdf
+@@ -1,7 +1,7 @@
+ <sdf version='1.9'>
+   <world name='default'>
+     <physics type="ode">
+-      <max_step_size>0.004</max_step_size>
++      <max_step_size>0.001</max_step_size>
+       <real_time_factor>1.0</real_time_factor>
+       <real_time_update_rate>250</real_time_update_rate>
+     </physics>

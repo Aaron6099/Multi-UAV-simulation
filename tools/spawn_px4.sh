@@ -48,8 +48,12 @@ for i in "${!POSES[@]}"; do
             export PX4_GZ_MODEL=x500
             export PX4_GZ_MODEL_POSE='$POSE'
             cd '$PX4_DIR'
-            ./build/px4_sitl_default/bin/px4 -i $i
-            exec bash
+            mkdir -p '$HOME/px4_logs'
+            ./build/px4_sitl_default/bin/px4 -i $i 2>&1 | tee '$HOME/px4_logs/px4_$i.log'
+            st=\${PIPESTATUS[0]}
+            # 不再 exec bash：px4 退出/被杀后标签自动关闭，杜绝僵留空壳标签。
+            # 仅异常退出时停留几秒供查看（输出已同时落盘到日志，崩溃信息不丢）。
+            [ \"\$st\" -ne 0 ] && echo \"[px4 -i $i 异常退出 st=\$st，5s 后关闭；日志 ~/px4_logs/px4_$i.log]\" && sleep 5
         "
     else
         LOG_DIR="$HOME/px4_logs"
