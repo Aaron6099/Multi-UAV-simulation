@@ -143,8 +143,14 @@ class SafetyFilter:
                 if d < self.d_emergency:               # 紧急：横向全停
                     v[:2] = 0.0
                     severity = max(severity, 2); reasons.append(f'collide_emerg(d={d:.2f})')
-                elif d < self.d_warn and v_close > 0:   # 预警：只抑制接近分量
-                    v[:2] -= v_close * toward
+                elif d < self.d_warn:                   # 预警：抑制接近 + 排斥推开
+                    if v_close > 0:                     # 抑制接近分量
+                        v[:2] -= v_close * toward
+                    # 排斥分量：越近越强，防横向交叉
+                    away = dvec / d                     # 远离邻居方向
+                    repel_mag = self.max_speed * (1.0/d - 1.0/self.d_warn) / (1.0/self.d_emergency - 1.0/self.d_warn)
+                    repel_mag = max(0.0, min(repel_mag, self.max_speed))
+                    v[:2] += repel_mag * away
                     severity = max(severity, 1); reasons.append(f'collide_warn(d={d:.2f})')
 
         # 缺口5b：速度硬帽

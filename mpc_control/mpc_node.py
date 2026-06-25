@@ -473,6 +473,7 @@ class MpcControllerNode(Node):
 
         # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
         self._relinquished = False
+        self._relinquish_cooldown_end = 0.0  # monotonic time; prevent rapid re-RELINQUISH
         self._safety_self_timeout = 0.3   # 默认值；safety ON 时由参数覆盖
         if bool(self.get_parameter('safety_filter_enable').value):
             s_track = float(self.get_parameter('safety_max_track_dist').value)
@@ -790,8 +791,13 @@ class MpcControllerNode(Node):
                     VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
         if self._nav_state == 14 and self._arming_state == 2:
             self._arm_offboard_confirmed = True
-            self.get_logger().info(
-                f'drone {self.drone_id}: OFFBOARD + ARMED confirmed')
+            if self._relinquished:
+                self._relinquished = False
+                self.get_logger().info(
+                    f'drone {self.drone_id}: OFFBOARD + ARMED confirmed (recovered from RELINQUISH)')
+            else:
+                self.get_logger().info(
+                    f'drone {self.drone_id}: OFFBOARD + ARMED confirmed')
 
     def on_self_attitude(self, msg):
         self.attitude_yaw = quaternion_to_yaw(msg.q)
@@ -909,8 +915,9 @@ class MpcControllerNode(Node):
                 target if abs(err) <= step else cur + math.copysign(step, err))
 
     def control_loop(self):
-        if self._relinquished:
-            return   # 已交还 PX4：停发 offboard/setpoint，由 FC 失效保护接管
+        # RELINQUISH 后不停循环：让 line ~935 的 OFFBOARD 丢失恢复机制
+        # 检测 nav!=14 → 重新 ARM+OFFBOARD → 恢复控制。
+        # 不再 return（旧行为导致 RELINQUISH 后永卡 Hold）。
         self.publish_offboard_mode()
         now_ros = self.get_clock().now()
         dt = (now_ros - self.last_control_time).nanoseconds * 1e-9
@@ -1077,12 +1084,20 @@ class MpcControllerNode(Node):
                     self.get_logger().warn(
                         f"[d{self.drone_id}] SAFETY {sres['state']} {sres['reasons']}")
             if not sres['publish']:
-                # RELINQUISH：停发，交还 PX4 失效保护（COM_OF_LOSS_T→COM_OBL_RC_ACT）
-                self._relinquished = True
-                self.get_logger().error(
-                    f"[d{self.drone_id}] SAFETY RELINQUISH {sres['reasons']} — 交还 PX4")
-                self._publish_health()
-                return
+                now_s = now_ros.nanoseconds * 1e-9
+                if now_s < self._relinquish_cooldown_end:
+                    # 冷却期内：允许 MPC 继续发 setpoint（PX4 在 OFFBOARD → 不会失控）
+                    # 同时让 OFFBOARD 丢失恢复机制（line ~935）重新 ARM
+                    pass
+                else:
+                    # RELINQUISH：停发，交还 PX4 失效保护（COM_OF_LOSS_T→COM_OBL_RC_ACT）
+                    self._relinquished = True
+                    self._relinquish_cooldown_end = now_s + 5.0   # 5s 冷却，防反复触发
+                    self.get_logger().error(
+                        f"[d{self.drone_id}] SAFETY RELINQUISH {sres['reasons']} — 交还 PX4, "
+                        f"cooldown 5s")
+                    self._publish_health()
+                    return
 
         # Position error for logging
         pos_err = float(np.linalg.norm(pos_err_vec[:2]))
