@@ -19,8 +19,6 @@
 |------|------|
 | `4001_gz_x500` | 改好的 airframe **整文件副本**，应急可直接 cp 覆盖 |
 | `4001_gz_x500.patch` | airframe 相对 PX4 stock 的 `git diff`（精确改动） |
-| `default_sdf_max_step.patch` | `default.sdf` 的 `git diff`（仅 1 行物理步长改动，见下方 ⚠️） |
-
 对应的 PX4 路径：
 
 ```
@@ -58,27 +56,22 @@ cp "$PX4/$AIR" "$PX4/build/px4_sitl_default/etc/init.d-posix/airframes/4001_gz_x
 
 ---
 
-## 改动二：`default.sdf` 物理步长 ⚠️ 待查
+## `default.sdf` 物理步长（已验证回退 stock，无需保留）
 
-```
-<max_step_size>0.004</max_step_size>   →   <max_step_size>0.001</max_step_size>
-```
+固化时曾发现本地 `default.sdf` 的 `max_step_size` 被改为 `0.001`（stock = `0.004`），
+来历不明（推测为 2026-04-30 项目初期误留）。
 
-**⚠️ 此改动来历不明，未在任何 STATE / 实验记录里登记，固化时一并保留以免丢失，但需复核：**
+**结论（2026-06-25 S8 验证）**：
 
-- 物理步长从 4ms 缩到 1ms。配合 world 里 `real_time_update_rate=250`，典型 Gazebo 下
-  实时率上限 ≈ `0.001 × 250 = 0.25`，即**仿真可能慢约 4 倍**（wall-clock 是 sim time 的 4 倍）。
-- run4–run6 的 PASS 结果**很可能就是在此 0.001 步长下取得的**——回退到 stock `0.004` 前，
-  应确认是否会改变多机起飞 / 收敛行为。
-- **下一步（待决）**：弄清这个 0.001 是有意为数值稳定而改、还是某次调试误留；
-  若无依赖则回退 `0.004` 可让仿真提速约 4 倍。
+- 已回退至 stock `0.004`；`git -C ~/PX4-Autopilot-1.14 diff` 显示无差异。
+- 在 stock 步长下完整跑了 S8_grid9_circle（891s，9 机）：
+  - pos_err 稳态 0.10–0.11 m，min_spacing 2.30 m，0 违规，0 RELINQUISH
+  - gz 真高 4.01–4.23 m（scatter 0.22 m，优于 run6 的 0.25 m）
+- **仿真速度提升约 4 倍**（RTF 上限从 0.25 恢复至 1.0），控制质量无退化。
+- `default_sdf_max_step.patch` 已删除，`default.sdf` 与 PX4 stock 完全一致，**不再需要本备份**。
 
-### 应用 / 回退
-
+若将来需要确认步长：
 ```bash
-PX4=~/PX4-Autopilot-1.14
-# 应用本备份（设回 0.001）：
-git -C "$PX4" apply /path/to/px4_overrides/default_sdf_max_step.patch
-# 回退到 stock 0.004：
-git -C "$PX4" checkout -- Tools/simulation/gz/worlds/default.sdf
+grep max_step_size ~/PX4-Autopilot-1.14/Tools/simulation/gz/worlds/default.sdf
+# 期望输出：<max_step_size>0.004</max_step_size>
 ```
