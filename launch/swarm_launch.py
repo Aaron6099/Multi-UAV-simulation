@@ -77,12 +77,10 @@ def _make_nodes(context, *args, **kwargs):
     birth_flat = _flatten(births)
     offsets_flat = _flatten(offsets)
 
-    # ── MPC 公共参数：defaults + scenario.limits 覆盖（限幅项均 float）────────
+    # ── MPC 公共参数：defaults + formation 默认 + scenario.limits 覆盖 ─────────
     common = dict(cfg.get('defaults', {}))
-    for k, v in scen.get('limits', {}).items():
-        common[k] = float(v)
 
-    # ── 5/9 机高度拉齐：开 Tier2 alt re-sync 并加快收敛 ───────────────────────
+    # ── 5/9 机高度拉齐：开 Tier2 alt re-sync 并加快收敛（先设，limits 可覆盖）──
     # SITL 多 PX4 实例 baro/EKF 的 ref_alt 各自温漂，不拉齐则各机控到 local z=-5
     # 时真实高度散 ~1.5m。drone0 广播 ref_alt 基准、各机限速纠 world_birth_z。
     # rate 0.05→0.2(补 0.5m 偏差 10s→2.5s)、EMA alpha 0.05→0.1(滤波 0.4s→0.2s)。
@@ -91,6 +89,11 @@ def _make_nodes(context, *args, **kwargs):
         common['alt_resync_enable'] = True
         common['alt_resync_rate'] = 0.2
         common['alt_ref_filter_alpha'] = 0.1
+
+    # scenario.limits 最高优先级（后设，可覆盖 formation 默认值）
+    # bool 项（如 alt_resync_enable）保留 bool，否则 ROS2 参数类型不匹配；其余转 float
+    for k, v in scen.get('limits', {}).items():
+        common[k] = v if isinstance(v, bool) else float(v)
 
     # ── P2 故障注入：scenario.faults（S14 杀节点 / S16 通信劣化）──────────────
     faults = scen.get('faults', {})

@@ -5,6 +5,8 @@ import random
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import (
     QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy,
 )
@@ -18,6 +20,8 @@ from px4_msgs.msg import (
     VehicleCommand,
     VehicleStatus,
 )
+
+from mpc_control.safety_filter import SafetyFilter
 
 
 # ------------------------------------------------------------------ helpers
@@ -238,6 +242,8 @@ class DroneState:
         self.pos = np.zeros(3)
         self.vel = np.zeros(3)
         self.yaw = 0.0
+        self.xy_valid = False   # EKF 水平估计健康（safety_filter 估计门用）
+        self.z_valid = False    # EKF 垂直估计健康
 
 
 # -- node
@@ -286,6 +292,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('alt_resync_rate', 0.05)       # m/s，world_birth_z 逼近限速(防 MPC z 跳)
         self.declare_parameter('alt_ref_filter_alpha', 0.05)  # 当前 ref_alt 的 EMA 系数
         self.declare_parameter('alt_resync_max', 3.0)         # m，单机 z 偏移安全上限
+        # 悬停期一次性高度 trim：各机 home ref_alt 不同 → 同控 -5 真高散；用 ref_alt 与
+        # drone0 datum 之差偏调 target_alt(而非 world_birth_z，避开 alt_resync 撞机根因)，
+        # 使各机收敛到同一绝对海拔=同真高；起飞前(leader 起动)冻结，圆周中不再变。
+        self.declare_parameter('alt_trim_enable', False)
+        self.declare_parameter('alt_trim_max', 2.0)           # m，trim 安全上限
 
         self.declare_parameter('mpc_horizon', 20)
         self.declare_parameter('mpc_dt', 0.05)
@@ -296,6 +307,11 @@ class MpcControllerNode(Node):
         self.declare_parameter('d_safe', 1.2)
         self.declare_parameter('w_collision', 200.0)
         self.declare_parameter('w_formation', 0.5)
+        # 候选①：XY 位置反馈（前馈 + 有界 P）。kp=0 → 纯前馈(现状/1c4bc5a 行为)；
+        # >0 时叠加饱和限幅的位置纠偏，抓住运动时碰撞约束推离槽位的漂移、防发散。
+        # cap 限幅避免无阻尼比例环的圆周震荡。非 acados 烤死参数，改后无需清缓存。
+        self.declare_parameter('vel_xy_kp', 0.0)
+        self.declare_parameter('vel_xy_cap', 0.8)
         self.declare_parameter('acados_build_dir', '/tmp/acados_di_mpc')
         # P2 故障注入：邻居预测轨迹的通信劣化（S16；0=关闭）。
         # delay 注入后走既有时间对齐路径（latency 平移），dropout 直接丢弃消息——
@@ -306,6 +322,14 @@ class MpcControllerNode(Node):
         # 等待飞手用 RC 解锁+切 OFFBOARD（PX4 要求切换前 setpoint 流已 >2Hz，满足）。
         # SITL 无 RC，保持默认 true 自动解锁。
         self.declare_parameter('auto_arm_enable', True)
+
+        # companion 安全滤波层（缺省保守；真机经 launch 覆盖，d_emergency 应 < d_safe）
+        self.declare_parameter('safety_filter_enable', True)
+        self.declare_parameter('safety_max_track_dist', 5.0)   # m，偏离参考点上限=飞散阈值
+        self.declare_parameter('safety_max_alt', 8.0)          # m，最大离地绝对高度
+        self.declare_parameter('safety_min_alt', 0.3)          # m，最小离地绝对高度
+        self.declare_parameter('safety_d_emergency', 1.2)      # m，硬碰撞地板（< d_safe）
+        self.declare_parameter('safety_self_timeout', 0.3)     # s，自机 EKF 话题新鲜度门限（独立于邻居超时）
 
         self.drone_id   = int(self.get_parameter('drone_id').value)
         self.num_drones = int(self.get_parameter('num_drones').value)
@@ -341,6 +365,8 @@ class MpcControllerNode(Node):
         self.target_alt = float(self.get_parameter('target_alt').value)
         self.max_speed  = float(self.get_parameter('max_speed').value)
         self.max_climb  = float(self.get_parameter('max_climb').value)
+        self.vel_xy_kp  = float(self.get_parameter('vel_xy_kp').value)
+        self.vel_xy_cap = float(self.get_parameter('vel_xy_cap').value)
         self.max_accel  = float(self.get_parameter('max_accel').value)
         self.control_hz = float(self.get_parameter('control_hz').value)
         self.neighbour_timeout = float(self.get_parameter('neighbour_timeout').value)
@@ -411,6 +437,11 @@ class MpcControllerNode(Node):
         self._alt_resync_rate   = float(self.get_parameter('alt_resync_rate').value)
         self._alt_ref_alpha     = float(self.get_parameter('alt_ref_filter_alpha').value)
         self._alt_resync_max    = float(self.get_parameter('alt_resync_max').value)
+        # 悬停期高度 trim 状态
+        self._alt_trim_enable = bool(self.get_parameter('alt_trim_enable').value)
+        self._alt_trim_max    = float(self.get_parameter('alt_trim_max').value)
+        self._alt_trim        = 0.0     # m，加到 target_alt 的世界系 z 偏调（NED）
+        self._alt_trim_frozen = False   # leader 起动后冻结，圆周中不再变
         # 连续 EKF-valid 帧计数,用于 world_birth 校准的收敛门控
         self._valid_streak = [0] * self.num_drones
         # 校准滚动窗口：最近若干帧的 local (x,y,z)，用于稳定性门控
@@ -440,6 +471,29 @@ class MpcControllerNode(Node):
         )
         self.get_logger().info('acados OCP ready.')
 
+        # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
+        self._relinquished = False
+        self._relinquish_cooldown_end = 0.0  # monotonic time; prevent rapid re-RELINQUISH
+        self._safety_self_timeout = 0.3   # 默认值；safety ON 时由参数覆盖
+        if bool(self.get_parameter('safety_filter_enable').value):
+            s_track = float(self.get_parameter('safety_max_track_dist').value)
+            s_maxa  = float(self.get_parameter('safety_max_alt').value)
+            s_mina  = float(self.get_parameter('safety_min_alt').value)
+            s_demg  = float(self.get_parameter('safety_d_emergency').value)
+            self._safety_self_timeout = float(self.get_parameter('safety_self_timeout').value)
+            s_dwarn = max(s_demg + 0.5, d_safe + 0.5)
+            self.safety = SafetyFilter(
+                max_track_dist=s_track, max_alt=s_maxa, min_alt=s_mina,
+                d_emergency=s_demg, d_warn=s_dwarn,
+                max_speed=self.max_speed, max_climb=self.max_climb,
+                max_accel=self.max_accel, drone_id=self.drone_id)
+            self.get_logger().info(
+                f'safety_filter ON: track<{s_track}m alt[{s_mina},{s_maxa}]m '
+                f'd_emerg={s_demg}m d_warn={s_dwarn}m self_timeout={self._safety_self_timeout}s')
+        else:
+            self.safety = None
+            self.get_logger().warn('safety_filter OFF（仅调试用，真机务必开）')
+
         # ROS 2 IO
         qos     = make_px4_qos()      # 订阅 PX4 "out" 话题（TRANSIENT_LOCAL）
         pub_qos = make_px4_pub_qos()  # 发布到 PX4 "in" 话题（VOLATILE，必须匹配 PX4 DataReader）
@@ -459,26 +513,32 @@ class MpcControllerNode(Node):
         self._nav_state   = 0
         self._arm_offboard_confirmed = False
         self._cmd_retry_counter = 0   # frames since startup finished
+        # 控制定时器与所有订阅分属不同回调组 + MultiThreadedExecutor：
+        # 否则单线程 executor 下 50Hz 控制定时器会被 9 邻居+leader+位置订阅的回调洪流
+        # 偶发拖过 0.5s → offboard setpoint 断流 → PX4 报 offboard_control_signal_lost → Hold。
+        # 共享态(ds.pos/vel、leader_pos、peer_predictions)均为原子 rebind，跨线程读最多取到旧一帧，安全。
+        self._cb_control = MutuallyExclusiveCallbackGroup()
+        self._cb_subs = MutuallyExclusiveCallbackGroup()
         self.create_subscription(
             VehicleStatus,
             topic_for_drone(self.drone_id, 'out/vehicle_status'),
-            self._on_vehicle_status, qos,
+            self._on_vehicle_status, qos, callback_group=self._cb_subs,
         )
         self.create_subscription(
             VehicleAttitude,
             topic_for_drone(self.drone_id, 'out/vehicle_attitude'),
-            self.on_self_attitude, qos,
+            self.on_self_attitude, qos, callback_group=self._cb_subs,
         )
         self.create_subscription(
             VehicleLocalPosition,
             topic_for_drone(self.drone_id, 'out/vehicle_local_position'),
-            self._make_pos_callback(self.drone_id), qos,
+            self._make_pos_callback(self.drone_id), qos, callback_group=self._cb_subs,
         )
         for j in self.neighbours:
             self.create_subscription(
                 VehicleLocalPosition,
                 topic_for_drone(j, 'out/vehicle_local_position'),
-                self._make_pos_callback(j), qos,
+                self._make_pos_callback(j), qos, callback_group=self._cb_subs,
             )
         leader_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -487,6 +547,7 @@ class MpcControllerNode(Node):
         )
         self.create_subscription(
             Float64MultiArray, '/leader/state', self.on_leader_state, leader_qos,
+            callback_group=self._cb_subs,
         )
         # Tier2: 全员高度基准 —— drone0 广播当前 ref_alt，各机据此 re-sync world_birth_z
         datum_qos = QoSProfile(
@@ -500,6 +561,7 @@ class MpcControllerNode(Node):
         )
         self.create_subscription(
             Float64, '/swarm/alt_datum', self._on_alt_datum, datum_qos,
+            callback_group=self._cb_subs,
         )
         self.pub_predicted = self.create_publisher(
             Float64MultiArray,
@@ -515,9 +577,13 @@ class MpcControllerNode(Node):
             self.create_subscription(
                 Float64MultiArray,
                 mpc_topic_for_drone(j, 'predicted_trajectory'),
-                self._make_pred_callback(j), 10,
+                self._make_pred_callback(j), 10, callback_group=self._cb_subs,
             )
-        self.timer = self.create_timer(1.0 / self.control_hz, self.control_loop)
+        # 控制定时器单独成组 → 与订阅并行、永不被回调洪流饿死
+        self.timer = self.create_timer(
+            1.0 / self.control_hz, self.control_loop,
+            callback_group=self._cb_control,
+        )
 
         self.get_logger().info(
             f'mpc_controller drone {self.drone_id} ready. '
@@ -572,12 +638,25 @@ class MpcControllerNode(Node):
                 # 已用 GPS 海拔差校准，z_reset 后必须同步补偿，否则 MPC 世界坐标系
                 # 中 ds.pos 会跳变，导致各机高度不一致。
                 if msg.z_reset_counter > self._prev_z_reset[drone_idx]:
-                    self.world_birth[drone_idx, 2] -= float(msg.delta_z)
-                    self.get_logger().warn(
-                        f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
-                        f'delta={msg.delta_z:+.2f}; '
-                        f'world_birth_z → {self.world_birth[drone_idx,2]:+.2f}'
-                    )
+                    # 起飞期(离地<1m)的 z_reset 多为 EKF 沉降/气压计settle，把跳变补进
+                    # world_birth_z 会将一次性偏移永久烤成真高误差(d5 起飞期 reset#3
+                    # delta=-0.76 → 真高永久偏 +0.76m)。与 alt_resync 离地门控(:843)同
+                    # 思路：近地 reset 只推进计数器、不补偿；飞行中 reset 仍补偿以保世界系
+                    # 连续、不扰编队几何。msg 为 drone_idx 本机 local_position，-z=离地高度。
+                    alt_agl = -float(msg.z)
+                    if alt_agl < 1.0:
+                        self.get_logger().warn(
+                            f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
+                            f'delta={msg.delta_z:+.2f}; 离地{alt_agl:.2f}m<1m(起飞期)'
+                            f'→ 不补偿 world_birth_z(保持 {self.world_birth[drone_idx,2]:+.2f})'
+                        )
+                    else:
+                        self.world_birth[drone_idx, 2] -= float(msg.delta_z)
+                        self.get_logger().warn(
+                            f'[veh {drone_idx}] z reset #{msg.z_reset_counter}, '
+                            f'delta={msg.delta_z:+.2f}; '
+                            f'world_birth_z → {self.world_birth[drone_idx,2]:+.2f}'
+                        )
                     self._prev_z_reset[drone_idx] = msg.z_reset_counter
 
             # --- one-time world_birth calibration, GATED on EKF convergence ---
@@ -673,6 +752,8 @@ class MpcControllerNode(Node):
 
             ds.received = True
             ds.last_stamp = now
+            ds.xy_valid = bool(msg.xy_valid)   # EKF 健康（safety_filter 估计门）
+            ds.z_valid = bool(msg.z_valid)
             # Use DYNAMIC world_birth (compensates for EKF resets)
             ds.pos = np.array([msg.x, msg.y, msg.z]) + self.world_birth[drone_idx]
             ds.vel = np.array([msg.vx, msg.vy, msg.vz])
@@ -710,8 +791,13 @@ class MpcControllerNode(Node):
                     VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
         if self._nav_state == 14 and self._arming_state == 2:
             self._arm_offboard_confirmed = True
-            self.get_logger().info(
-                f'drone {self.drone_id}: OFFBOARD + ARMED confirmed')
+            if self._relinquished:
+                self._relinquished = False
+                self.get_logger().info(
+                    f'drone {self.drone_id}: OFFBOARD + ARMED confirmed (recovered from RELINQUISH)')
+            else:
+                self.get_logger().info(
+                    f'drone {self.drone_id}: OFFBOARD + ARMED confirmed')
 
     def on_self_attitude(self, msg):
         self.attitude_yaw = quaternion_to_yaw(msg.q)
@@ -767,6 +853,36 @@ class MpcControllerNode(Node):
     def _on_alt_datum(self, msg):
         self._datum_ref_alt = float(msg.data)
 
+    def _eff_target_alt(self):
+        """有效目标高度（世界系 NED）= 基准 target_alt + 悬停期标定的 alt_trim。
+        alt_trim=0 时等价原行为。"""
+        return self.target_alt + self._alt_trim
+
+    def _update_alt_trim(self):
+        """悬停期：用本机 ref_alt 与 drone0 datum 之差偏调 target_alt，使各机收敛到
+        同一绝对海拔（=同真高）。leader 起动即冻结，圆周中不再变。只调设定点、不动
+        world_birth_z，故不扰碰撞/编队几何（避开 alt_resync 撞机根因）。"""
+        if not self._alt_trim_enable or self._alt_trim_frozen:
+            return
+        # leader 起动 → 冻结当前 trim
+        if float(np.linalg.norm(self.leader_vel)) > 0.05:
+            self._alt_trim_frozen = True
+            self.get_logger().info(
+                f'[d{self.drone_id}] alt_trim 冻结 @ {self._alt_trim:+.2f}m（leader 起动）')
+            return
+        my_ref = self._ref_alt_now[self.drone_id]
+        if (self._datum_ref_alt is None or my_ref is None
+                or not self._pos_calibrated[self.drone_id]):
+            return
+        # 离地<1m（起飞期）不调，防地面暂态
+        self_ds = self.drone_states[self.drone_id]
+        if not self_ds.received or (-self_ds.pos[2]) < 1.0:
+            return
+        raw = float(np.clip(my_ref - self._datum_ref_alt,
+                            -self._alt_trim_max, self._alt_trim_max))
+        # 低通收敛，防 ref_alt 噪声抖动
+        self._alt_trim = 0.9 * self._alt_trim + 0.1 * raw
+
     def _resync_world_birth_z(self, dt):
         """Tier2: 把(已标定)机的 world_birth_z 限速拉向 birth_z + (datum - 当前ref_alt)。
         ref_alt 连续温漂不触发 z_reset，:507 补不到；这里持续纠偏，且限速使 MPC 只看到
@@ -780,6 +896,10 @@ class MpcControllerNode(Node):
                 m.data = float(self._datum_ref_alt)
                 self.pub_alt_datum.publish(m)
         if not self._alt_resync_enable or self._datum_ref_alt is None:
+            return
+        # 自机离地 < 1m 时不做 resync：防起飞期 world_birth_z 误漂导致安全层误判高度
+        self_ds_alt = self.drone_states[self.drone_id]
+        if not self_ds_alt.received or (-self_ds_alt.pos[2]) < 1.0:
             return
         step = max(0.0, self._alt_resync_rate * dt)
         for idx in [self.drone_id] + list(self.neighbours):
@@ -795,6 +915,9 @@ class MpcControllerNode(Node):
                 target if abs(err) <= step else cur + math.copysign(step, err))
 
     def control_loop(self):
+        # RELINQUISH 后不停循环：让 line ~935 的 OFFBOARD 丢失恢复机制
+        # 检测 nav!=14 → 重新 ARM+OFFBOARD → 恢复控制。
+        # 不再 return（旧行为导致 RELINQUISH 后永卡 Hold）。
         self.publish_offboard_mode()
         now_ros = self.get_clock().now()
         dt = (now_ros - self.last_control_time).nanoseconds * 1e-9
@@ -803,6 +926,7 @@ class MpcControllerNode(Node):
             dt = 1.0 / self.control_hz
 
         self._resync_world_birth_z(dt)   # Tier2: 补偿 ref_alt 连续温漂
+        self._update_alt_trim()          # 悬停期高度 trim（leader 起动前标定，之后冻结）
 
         # 使用当前姿态 yaw，避免起飞时强制转向正北
         yaw_hold = self.attitude_yaw if self.attitude_received else 0.0
@@ -813,7 +937,13 @@ class MpcControllerNode(Node):
             self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
             return
 
-        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed
+        # After startup: retry ARM+OFFBOARD every 50 frames (1 s) until confirmed.
+        # Also re-arm if OFFBOARD was lost after initial confirmation (nav dropped from 14).
+        if self._arm_offboard_confirmed and self.auto_arm_enable and self._nav_state != 14:
+            self._arm_offboard_confirmed = False
+            self._cmd_retry_counter = 0
+            self.get_logger().warn(
+                f'drone {self.drone_id}: OFFBOARD LOST (nav={self._nav_state}) — resetting, will re-arm')
         if not self._arm_offboard_confirmed:
             self._cmd_retry_counter += 1
             if self._cmd_retry_counter % 50 == 1:
@@ -911,13 +1041,19 @@ class MpcControllerNode(Node):
         vel_correction = np.clip(pos_err_vec * Kp_pos, -self.max_speed, self.max_speed)
 
         # Blend: MPC velocity + position correction
-        # 横向：直接用 MPC 优化速度。原先叠加 0.5·Kp·pos_err 的外层纯比例 P 环，
-        # 在已最优的 MPC 上再套一层无阻尼比例修正 → 僚机过冲、圆周震荡。MPC 内部
-        # 已含 q_pos/q_vel 与速度前馈(ref 的 vel+acc·t)，横向跟踪交给它即可。
+        # 横向：MPC 优化速度前馈 + 候选①可选的饱和限幅位置 P。原先叠加 0.5·Kp·pos_err
+        # 的外层「无限幅」比例环 → 僚机过冲、圆周震荡(1c4bc5a 删之)。这里改为有界 P：
+        # vel_xy_kp=0 时退回纯前馈(等价 1c4bc5a)；>0 时纠偏被 vel_xy_cap 限幅，
+        # 抓住密集 grid 运动中碰撞约束推离槽位的漂移、防发散，又不致无阻尼震荡。
         # 垂直：保留纯 P(高度保持，与横向解耦，不引起震荡)。
         vel_sp = np.zeros(3)
         vel_sp[0] = pred_vel[0]
         vel_sp[1] = pred_vel[1]
+        if self.vel_xy_kp > 0.0:
+            corr_xy = np.clip(pos_err_vec[:2] * self.vel_xy_kp,
+                              -self.vel_xy_cap, self.vel_xy_cap)
+            vel_sp[0] += corr_xy[0]
+            vel_sp[1] += corr_xy[1]
         vel_sp[2] = vel_correction[2]  # pure P-controller for z (altitude hold)
 
         # Clip to limits
@@ -929,6 +1065,39 @@ class MpcControllerNode(Node):
         # Safety: NaN check
         if not np.all(np.isfinite(vel_sp)):
             vel_sp = np.zeros(3)
+
+        # ── companion 安全滤波层：围栏/碰撞地板/估计门/失效状态机（下发前）──
+        if self.safety is not None:
+            now_s = now_ros.nanoseconds * 1e-9
+            nbrs = [(self.drone_states[j].pos,
+                     self.drone_states[j].received
+                     and (now_s - self.drone_states[j].last_stamp) <= self.neighbour_timeout)
+                    for j in self.neighbours]
+            est_ok = (self_ds.xy_valid and self_ds.z_valid
+                      and (now_s - self_ds.last_stamp) <= self._safety_self_timeout)
+            sres = self.safety.step(self_ds.pos, self_ds.vel, vel_sp, ref_pos, dt,
+                                    neighbours=nbrs, est_ok=est_ok)
+            vel_sp = sres['vel_sp']
+            if sres['state'] != 'NORMAL':
+                self._hover_active = True
+                if self._dbg_counter % int(self.control_hz) == 0:
+                    self.get_logger().warn(
+                        f"[d{self.drone_id}] SAFETY {sres['state']} {sres['reasons']}")
+            if not sres['publish']:
+                now_s = now_ros.nanoseconds * 1e-9
+                if now_s < self._relinquish_cooldown_end:
+                    # 冷却期内：允许 MPC 继续发 setpoint（PX4 在 OFFBOARD → 不会失控）
+                    # 同时让 OFFBOARD 丢失恢复机制（line ~935）重新 ARM
+                    pass
+                else:
+                    # RELINQUISH：停发，交还 PX4 失效保护（COM_OF_LOSS_T→COM_OBL_RC_ACT）
+                    self._relinquished = True
+                    self._relinquish_cooldown_end = now_s + 5.0   # 5s 冷却，防反复触发
+                    self.get_logger().error(
+                        f"[d{self.drone_id}] SAFETY RELINQUISH {sres['reasons']} — 交还 PX4, "
+                        f"cooldown 5s")
+                    self._publish_health()
+                    return
 
         # Position error for logging
         pos_err = float(np.linalg.norm(pos_err_vec[:2]))
@@ -972,7 +1141,7 @@ class MpcControllerNode(Node):
             t = k * self.mpc_dt
             # 二阶预测：pos + vel*t + 0.5*acc*t²（圆周运动时捕捉向心加速度）
             pos = leader_pos_safe + leader_vel_safe * t + 0.5 * leader_acc_safe * t * t + self.my_offset
-            pos[2] = self.target_alt
+            pos[2] = self._eff_target_alt()
             x_ref[k, 0:3] = pos
             # 速度前馈也随加速度变化：vel(t) = vel(0) + acc*t
             vel_t = leader_vel_safe[:2] + leader_acc_safe[:2] * t
@@ -1038,9 +1207,9 @@ class MpcControllerNode(Node):
         """当前 XY 保持（有位置时）或出生点 XY，高度收敛到目标高度，均为世界系 NED。"""
         ds = self.drone_states[self.drone_id]
         if ds.received:
-            return np.array([ds.pos[0], ds.pos[1], self.target_alt])
+            return np.array([ds.pos[0], ds.pos[1], self._eff_target_alt()])
         birth = self.world_birth[self.drone_id]
-        return np.array([birth[0], birth[1], self.target_alt])
+        return np.array([birth[0], birth[1], self._eff_target_alt()])
 
     def publish_position_setpoint(self, pos_world_ned, vel_ff_world_ned, yaw):
         """位置闭环 + 速度前馈（PX4 官方推荐：position≠NaN时，velocity作前馈项）。
@@ -1087,11 +1256,16 @@ class MpcControllerNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MpcControllerNode()
+    # 多线程 executor：控制定时器(自己的回调组)与订阅(另一组)并行，
+    # 保证 50Hz offboard 心跳/ setpoint 不被订阅回调拖延 → 不丢 offboard 信号。
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

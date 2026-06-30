@@ -30,6 +30,8 @@ def main():
     ap.add_argument('csv', help='diag_monitor --log 生成的 CSV')
     ap.add_argument('--ready-err', type=float, default=0.5,
                     help='判定"进编队"的 pos_err 阈值 (m)，用于算成型时间')
+    ap.add_argument('--steady-offset', type=float, default=45.0,
+                    help='飞行开始后多少秒起算稳态窗口 (s)，默认 45')
     ap.add_argument('--plot', action='store_true',
                     help='画 pos_err / 最小间距曲线(需 matplotlib)')
     args = ap.parse_args()
@@ -48,12 +50,20 @@ def main():
     print(f'== 飞行报告: {args.csv} ==')
     print(f'时长 {dur:.0f}s，{len(rows)} 采样点，{ndr} 机\n')
 
+    # 稳态窗口掩码（t > t_start + steady_offset）
+    t_start = t[0] if (t and t[0] is not None) else 0.0
+    steady_t = t_start + args.steady_offset if t_start is not None else None
+
     # 每机 pos_err / 高度误差
     for i in range(ndr):
-        pe = [v for v in (_f(r[f'd{i}_poserr']) for r in rows) if v is not None]
-        ze = [abs(v) for v in (_f(r[f'd{i}_zerr']) for r in rows) if v is not None]
+        pe_all  = [(_f(r[f'd{i}_poserr']), _f(r['t'])) for r in rows]
+        pe      = [v for v, _ in pe_all if v is not None]
+        pe_ss   = [v for v, tt in pe_all if v is not None and tt is not None
+                   and steady_t is not None and tt > steady_t]
+        ze      = [abs(v) for v in (_f(r[f'd{i}_zerr']) for r in rows) if v is not None]
         if pe and ze:
-            print(f'drone{i}: pos_err max={max(pe):.2f} mean={st.mean(pe):.2f}m   '
+            ss_str = f' steady_mean(t>{args.steady_offset:.0f}s)={st.mean(pe_ss):.2f}m' if pe_ss else ''
+            print(f'drone{i}: pos_err max={max(pe):.2f} mean={st.mean(pe):.2f}m{ss_str}   '
                   f'|z_err| max={max(ze):.2f} mean={st.mean(ze):.2f}m')
 
     # 最小间距 + 安全违规
