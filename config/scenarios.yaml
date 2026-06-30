@@ -125,6 +125,8 @@ scenarios:
   S10_cross5_line_fast:                     # 速度应力：看限幅边界
     formation: cross5
     leader: {mode: line, speed: 2.5, max_distance: 30.0}
+    limits:
+      safety_max_track_dist: 35.0           # leader 最大位移 30m，留 5m 余量
 
   S11_cross5_perturbed:                     # 出生点扰动：从打乱初值收敛(两两已 > d_safe)
     formation: cross5
