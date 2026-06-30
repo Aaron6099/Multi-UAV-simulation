@@ -65,6 +65,7 @@ class LeaderNode(Node):
         self.declare_parameter('num_drones',        1)
         self.declare_parameter('ready_gate_enable', True)
         self.declare_parameter('ready_pos_err',     0.5)   # m，进编队判定阈值
+        self.declare_parameter('ready_alt_err',     1.5)   # m，高度误差阈值（需接近目标高度）
         self.declare_parameter('ready_hold',        2.0)   # s，就绪需连续保持时长
         self.declare_parameter('ready_timeout',     90.0)  # s，超时兜底：仍未就绪也开动(告警)
         self.declare_parameter('health_timeout',    2.0)   # s，health 超此视为失联
@@ -95,10 +96,12 @@ class LeaderNode(Node):
         self._num_drones        = int(self.get_parameter('num_drones').value)
         self._ready_gate_enable = bool(self.get_parameter('ready_gate_enable').value)
         self._ready_pos_err     = float(self.get_parameter('ready_pos_err').value)
+        self._ready_alt_err     = float(self.get_parameter('ready_alt_err').value)
         self._ready_hold        = float(self.get_parameter('ready_hold').value)
         self._ready_timeout     = float(self.get_parameter('ready_timeout').value)
         self._health_timeout    = float(self.get_parameter('health_timeout').value)
         self._health_pos_err = [None] * max(1, self._num_drones)
+        self._health_z_err   = [None] * max(1, self._num_drones)
         self._health_stamp   = [None] * max(1, self._num_drones)
         self._motion_started = False
         self._motion_start_t = 0.0
@@ -148,10 +151,12 @@ class LeaderNode(Node):
             if len(msg.data) >= 6:
                 self._health_pos_err[idx] = float(msg.data[5])
                 self._health_stamp[idx] = self.get_clock().now().nanoseconds * 1e-9
+            if len(msg.data) >= 7:
+                self._health_z_err[idx] = float(msg.data[6])
         return cb
 
     def _all_formed_up(self):
-        """所有机 health 新鲜且 pos_err < 阈值 → 编队已组好。"""
+        """所有机 health 新鲜、XY pos_err < 阈值、且高度已到位 → 编队已组好。"""
         if self._num_drones <= 0:
             return False
         now = self.get_clock().now().nanoseconds * 1e-9
@@ -161,6 +166,10 @@ class LeaderNode(Node):
             if stamp is None or (now - stamp) > self._health_timeout:
                 return False
             if err is None or err > self._ready_pos_err:
+                return False
+            # 高度检查：要求 drone 已飞到目标高度附近（旧 mpc_node 不发 index6 则跳过）
+            z_err = self._health_z_err[i]
+            if z_err is not None and z_err > self._ready_alt_err:
                 return False
         return True
 

@@ -108,10 +108,12 @@ class SafetyFilter:
             if r > 1e-6:
                 outward = dxy / r                      # 偏离参考点的方向
                 v_out = float(np.dot(v[:2], outward))  # 扩大偏差的速度分量（>0 越飞越偏）
-                if r > self.max_track_dist:            # 已飞散：刹掉扩大偏差分量，升级
-                    if v_out > 0:
+                if r > self.max_track_dist:            # 超出围栏
+                    if v_out > 0:                      # 仍在外扩：刹止并 RELINQUISH
                         v[:2] -= v_out * outward
-                    severity = max(severity, 2); reasons.append(f'flyaway_breach(track={r:.1f})')
+                        severity = max(severity, 2); reasons.append(f'flyaway_breach(track={r:.1f})')
+                    else:                              # 已在收敛回参考点：告警但不 RELINQUISH
+                        severity = max(severity, 1); reasons.append(f'flyaway_converging(track={r:.1f})')
                 elif r > self.max_track_dist * self.fence_brake_frac:  # 临界
                     if v_out > 0:
                         v[:2] -= v_out * outward

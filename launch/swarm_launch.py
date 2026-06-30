@@ -131,6 +131,13 @@ def _make_nodes(context, *args, **kwargs):
         'ready_pos_err': float(scen_leader.get('ready_pos_err', 0.5)),
     }
 
+    # 若 scenario/limits 未显式设置安全飞散阈值，从 leader max_distance 自动推导
+    # (默认 5m 对追线场景太紧；leader 最远 30m 时阈值自动升到 36m)
+    if 'safety_max_track_dist' not in scen.get('limits', {}):
+        md = leader_params['max_distance']
+        if md > 5.0:
+            common.setdefault('safety_max_track_dist', round(md * 1.2, 1))
+
     nodes = [Node(
         package='mpc_control', executable='leader_node', name='leader_node',
         output='screen', parameters=[leader_params],

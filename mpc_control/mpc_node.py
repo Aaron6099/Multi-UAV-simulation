@@ -423,6 +423,8 @@ class MpcControllerNode(Node):
         self._last_mpc_status = 0
         self._last_solve_ms = 0.0
         self._last_pos_err = 0.0
+        self._last_z_err   = 0.0
+        self._ocp_ready = False  # acados 编译完成前不尝试 ARM
 
         # EKF reset trackers (one per known drone)
         self._prev_xy_reset = [0] * self.num_drones
@@ -470,6 +472,7 @@ class MpcControllerNode(Node):
             instance_id=self.drone_id,
         )
         self.get_logger().info('acados OCP ready.')
+        self._ocp_ready = True
 
         # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
         self._relinquished = False
@@ -945,6 +948,10 @@ class MpcControllerNode(Node):
             self.get_logger().warn(
                 f'drone {self.drone_id}: OFFBOARD LOST (nav={self._nav_state}) — resetting, will re-arm')
         if not self._arm_offboard_confirmed:
+            if not self._ocp_ready:   # 等 acados 编译完再尝试 ARM，避免 OFFBOARD 超时
+                self._hover_active = True
+                self.publish_position_setpoint(self._hover_setpoint_world(), np.zeros(3), yaw_hold)
+                return
             self._cmd_retry_counter += 1
             if self._cmd_retry_counter % 50 == 1:
                 self._arm_and_engage_offboard()
@@ -1102,6 +1109,7 @@ class MpcControllerNode(Node):
         # Position error for logging
         pos_err = float(np.linalg.norm(pos_err_vec[:2]))
         self._last_pos_err = pos_err
+        self._last_z_err = abs(float(self_ds.pos[2] - self._eff_target_alt()))
 
         # ── 诊断：横向跟踪误差分解为 radial(径向)/tangential(切向)，1Hz ──
         # 切向 = leader 速度方向；径向 = 向心加速度反向(指向圆外)；圆周时二者正交。
@@ -1190,6 +1198,7 @@ class MpcControllerNode(Node):
             float(self._fallback_count),
             float(1 if self._hover_active else 0),
             float(self._last_pos_err),
+            float(self._last_z_err),   # index 6: 高度误差 |z - target_alt| (m)
         ]
         self.pub_health.publish(msg)
 
