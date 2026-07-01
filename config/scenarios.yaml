@@ -133,10 +133,12 @@ scenarios:
   S11_cross5_perturbed:                     # 出生点扰动：从打乱初值收敛(两两已 > d_safe)
     formation: cross5
     birth_override: [[1.0, 0.8, 0], [0.5, 3.4, 0], [-0.7, -2.6, 0],
-                     [3.5, -0.6, 0], [-2.8, 0.9, 0]]
+                     [3.5, -0.6, 0], [-3.5, -0.8, 0]]
+    # d4: (-2.8,+0.9)→(-3.5,-0.8): 旧值偏东与 d0 同 Y 侧，收敛+追踪期均易近撞；新值偏西南
     leader: {mode: line, speed: 1.0, max_distance: 20.0, ready_hold: 30.0, ready_pos_err: 0.8}
     limits:
       safety_max_track_dist: 12.0         # 打乱出生→初始 track_err 大，放宽围栏
+      w_collision: 400.0                  # 加重碰撞软约束，防追踪超调期 d0/d4 近撞
 
   S12_cross5_wide:                          # 加宽间距 3→5 m
     formation: cross5
