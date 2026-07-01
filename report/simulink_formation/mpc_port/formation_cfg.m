@@ -19,6 +19,11 @@ switch formation
     case 'cross5'                             % 十字：出生即队形（对照 scenarios.yaml）
         births = [0 0 0; 0 3 0; 0 -3 0; 3 0 0; -3 0 0];
         nbrs   = {[2 3 4 5], [1], [1], [1], [1]};
+    case 'grid9'                              % 3×3方阵，间距3m（对照 scenarios.yaml grid9）
+        births = [0 0 0; 0 3 0; 0 -3 0; 3 0 0; -3 0 0;
+                  3 3 0; -3 3 0; 3 -3 0; -3 -3 0];
+        nbrs   = {[2 3 4 5], [1 6 7], [1 8 9], [1 6 8], [1 7 9], ...
+                  [2 4], [2 5], [3 4], [3 5]};
     otherwise
         error('未知 formation "%s"', formation);
 end
@@ -69,6 +74,19 @@ switch mode
         error('未知 mode "%s"', mode);
 end
 % ── formation × mode 组合覆盖（对照 scenarios.yaml limits 字段）─────────────
+if strcmp(formation, 'grid9')
+    switch mode
+        case 'line'
+            cfg.lead_v  = 0.5;           % S7: speed=0.5
+            cfg.lead_d  = 12.0;          % S7: d=12m（9机紧凑路由）
+            cfg.t_start = 30.0;          % S7: ready_hold=30s
+            cfg.T = 85;                  % 30s hold + 12/0.5=24s + buffer
+        case 'circle'
+            cfg.lead_v  = 0.5;           % S8: speed=0.5
+            cfg.t_start = 30.0;          % S8: ready_hold=30s
+            cfg.T = 165;                 % 30s hold + 2π*10/0.5≈126s ≈ 1整圈
+    end
+end
 if strcmp(formation, 'cross5')
     switch mode
         case 'line'
