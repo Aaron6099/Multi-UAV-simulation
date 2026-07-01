@@ -1,8 +1,7 @@
 # Run metrics summary / 各 run 指标汇总
 
-| Run | UAV | dur[s] | max pos_err[m] | settle[s] | min spacing[m] | form_max[m] | solve max/mean[ms] | violations | fallbacks |
-|---|---|---|---|---|---|---|---|---|---|
-| solo1-line | 1 | 118 | 1.46 | 1 | — | 1.56 | 0.33/0.16 | 0 | 0 |
-| pair2-hover | 2 | 118 | 0.25 | 1 | 2.13 | 0.70 | 0.66/0.16 | 0 | 0 |
-| pair2-line | 2 | 148 | 0.48 | 1 | 2.82 | 0.66 | 0.80/0.16 | 0 | 0 |
-| trio3-circle | 3 | 299 | 4.01 | 1 | 3.62 | 3.88 | 0.67/0.18 | 0 | 0 |
+> steady_mean: t > t_start + 45s 窗口均值（跳过收敛过渡段）；overall_mean 为全程均值，含过渡段，仅供参考。
+
+| Run | UAV | dur[s] | max pos_err[m] | steady_mean[m] | settle[s] | min spacing[m] | form_max[m] | solve max/mean[ms] | violations | fallbacks |
+|---|---|---|---|---|---|---|---|---|---|---|
+| flight_grid9_circle_run5 | 9 | 7914 | 0.43 | 0.10 | 1 | 2.23 | 0.76 | 2.18/0.41 | 0 | 0 |
