@@ -25,3 +25,6 @@ Thumbs.db
 # Simulink build cache（slprj 在任意子目录都忽略，含 mpc_port/slprj）
 report/simulink_formation/**/slprj/
 *.slxc
+
+# Claude Code local (per-machine) settings — platform-specific hooks live here, not in git
+.claude/settings.local.json

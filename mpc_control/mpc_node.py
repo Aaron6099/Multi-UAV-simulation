@@ -497,6 +497,29 @@ class MpcControllerNode(Node):
             self.safety = None
             self.get_logger().warn('safety_filter OFF（仅调试用，真机务必开）')
 
+        # companion 安全滤波层（独立于 MPC，下发前过一道硬保护；不动 OCP→不清缓存）
+        self._relinquished = False
+        self._relinquish_cooldown_end = 0.0  # monotonic time; prevent rapid re-RELINQUISH
+        self._safety_self_timeout = 0.3   # 默认值；safety ON 时由参数覆盖
+        if bool(self.get_parameter('safety_filter_enable').value):
+            s_track = float(self.get_parameter('safety_max_track_dist').value)
+            s_maxa  = float(self.get_parameter('safety_max_alt').value)
+            s_mina  = float(self.get_parameter('safety_min_alt').value)
+            s_demg  = float(self.get_parameter('safety_d_emergency').value)
+            self._safety_self_timeout = float(self.get_parameter('safety_self_timeout').value)
+            s_dwarn = max(s_demg + 0.5, d_safe + 0.5)
+            self.safety = SafetyFilter(
+                max_track_dist=s_track, max_alt=s_maxa, min_alt=s_mina,
+                d_emergency=s_demg, d_warn=s_dwarn,
+                max_speed=self.max_speed, max_climb=self.max_climb,
+                max_accel=self.max_accel, drone_id=self.drone_id)
+            self.get_logger().info(
+                f'safety_filter ON: track<{s_track}m alt[{s_mina},{s_maxa}]m '
+                f'd_emerg={s_demg}m d_warn={s_dwarn}m self_timeout={self._safety_self_timeout}s')
+        else:
+            self.safety = None
+            self.get_logger().warn('safety_filter OFF（仅调试用，真机务必开）')
+
         # ROS 2 IO
         qos     = make_px4_qos()      # 订阅 PX4 "out" 话题（TRANSIENT_LOCAL）
         pub_qos = make_px4_pub_qos()  # 发布到 PX4 "in" 话题（VOLATILE，必须匹配 PX4 DataReader）
