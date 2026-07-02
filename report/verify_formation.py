@@ -38,7 +38,8 @@ OUTDIR    = os.path.join(os.path.dirname(__file__), 'figures')
 BUILD_DIR = '/tmp/acados_verify_formation'
 os.makedirs(OUTDIR,    exist_ok=True)
 os.makedirs(BUILD_DIR, exist_ok=True)
-COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple']
+COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+          'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
 
 # ── 队形偏移（scenarios.yaml formations.*.birth，z 叠 target_alt）─────────────
 FORMATIONS = {
@@ -53,24 +54,56 @@ FORMATIONS = {
                              [-1.5,  -2.598,  TARGET_ALT]]),
         'labels':  ['d0', 'd1', 'd2'],
     },
+    'cross5': {
+        'offsets': np.array([[ 0,  0,  TARGET_ALT],
+                             [ 0,  3,  TARGET_ALT],
+                             [ 0, -3,  TARGET_ALT],
+                             [ 3,  0,  TARGET_ALT],
+                             [-3,  0,  TARGET_ALT]]),
+        'labels':  ['d0', 'd1', 'd2', 'd3', 'd4'],
+    },
+    'grid9': {
+        'offsets': np.array([[ 0,  0,  TARGET_ALT],
+                             [ 0,  3,  TARGET_ALT],
+                             [ 0, -3,  TARGET_ALT],
+                             [ 3,  0,  TARGET_ALT],
+                             [-3,  0,  TARGET_ALT],
+                             [ 3,  3,  TARGET_ALT],
+                             [-3,  3,  TARGET_ALT],
+                             [ 3, -3,  TARGET_ALT],
+                             [-3, -3,  TARGET_ALT]]),
+        'labels':  ['d0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8'],
+    },
 }
 
 # ── 仿真场景 ──────────────────────────────────────────────────────────────────
 SCENARIOS = [
-    # (formation, mode, T_SIM_s, fname, title)
-    ('pair2', 'hover',  40.0, 'verify_pair2_hover.png',
-     'pair2 Hover — MPC Formation Verification (standalone acados)'),
-    ('pair2', 'line',   70.0, 'verify_pair2_line.png',
-     'pair2 Line v=0.5 m/s, d=20 m — MPC Formation Verification'),
-    ('trio3', 'hover',  40.0, 'verify_trio3_hover.png',
-     'trio3 Hover — MPC Formation Verification (standalone acados)'),
-    ('trio3', 'line',   70.0, 'verify_trio3_line.png',
-     'trio3 Line v=0.5 m/s, d=20 m — MPC Formation Verification'),
-    ('trio3', 'circle', 80.0, 'verify_trio3_circle.png',
-     'trio3 Circle R=10 m, v=1.5 m/s — MPC Formation Verification'),
+    # (formation, mode, T_SIM_s, fname, title, params)
+    ('pair2',  'hover',  40.0, 'verify_pair2_hover.png',
+     'pair2 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('pair2',  'line',   70.0, 'verify_pair2_line.png',
+     'pair2 Line v=0.5 m/s, d=20 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 20.0}),
+    ('trio3',  'hover',  40.0, 'verify_trio3_hover.png',
+     'trio3 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('trio3',  'line',   70.0, 'verify_trio3_line.png',
+     'trio3 Line v=0.5 m/s, d=20 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 20.0}),
+    ('trio3',  'circle', 80.0, 'verify_trio3_circle.png',
+     'trio3 Circle R=10 m, v=1.5 m/s — MPC Formation Verification',  {'circle_r': 10.0, 'circle_spd': 1.5}),
+    ('cross5', 'hover',  40.0, 'verify_cross5_hover.png',
+     'cross5 Hover — MPC Formation Verification (standalone acados)',  {}),
+    ('cross5', 'line',   65.0, 'verify_cross5_line.png',
+     'cross5 Line v=1.0 m/s, d=20 m — MPC Formation Verification',   {'line_spd': 1.0, 'line_dist': 20.0}),
+    ('cross5', 'circle', 110.0, 'verify_cross5_circle.png',
+     'cross5 Circle R=10 m, v=1.0 m/s — MPC Formation Verification', {'circle_r': 10.0, 'circle_spd': 1.0}),
+    ('grid9',  'hover',  40.0, 'verify_grid9_hover.png',
+     'grid9 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('grid9',  'line',   65.0, 'verify_grid9_line.png',
+     'grid9 Line v=0.5 m/s, d=12 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 12.0}),
+    ('grid9',  'circle', 160.0, 'verify_grid9_circle.png',
+     'grid9 Circle R=10 m, v=0.5 m/s — MPC Formation Verification',  {'circle_r': 10.0, 'circle_spd': 0.5}),
 ]
 
-MAX_DRONES = 3  # trio3 最多 3 机
+MAX_DRONES = 9  # grid9 最多 9 机
 
 
 # ── OCP solver 构建 ───────────────────────────────────────────────────────────
@@ -112,31 +145,29 @@ def build_solver():
 
 
 # ── leader 轨迹 ───────────────────────────────────────────────────────────────
-def make_leader(mode, T):
+def make_leader(mode, T, line_spd=0.5, line_dist=20.0, circle_r=10.0, circle_spd=1.5):
     t = np.arange(T) * DT
     traj = np.zeros((T, 3))
     if mode == 'hover':
         traj[:] = [0, 0, TARGET_ALT]
     elif mode == 'line':
-        spd = 0.5  # scenarios.yaml S2_pair2_line speed
         for i, ti in enumerate(t):
-            if   ti < 10.0:               traj[i] = [0,               0, TARGET_ALT]
-            elif ti < 10.0 + 20.0 / spd:  traj[i] = [(ti-10.0)*spd,  0, TARGET_ALT]
-            else:                          traj[i] = [20.0,            0, TARGET_ALT]
+            if   ti < 10.0:                         traj[i] = [0,              0, TARGET_ALT]
+            elif ti < 10.0 + line_dist / line_spd:  traj[i] = [(ti-10.0)*line_spd, 0, TARGET_ALT]
+            else:                                    traj[i] = [line_dist,      0, TARGET_ALT]
     elif mode == 'circle':
-        R, spd = 10.0, 1.5  # scenarios.yaml S3_trio3_circle
-        omega = spd / R
+        omega = circle_spd / circle_r
         for i, ti in enumerate(t):
             if ti < 10.0:
-                traj[i] = [R, 0, TARGET_ALT]
+                traj[i] = [circle_r, 0, TARGET_ALT]
             else:
                 th = omega * (ti - 10.0)
-                traj[i] = [R * math.cos(th), R * math.sin(th), TARGET_ALT]
+                traj[i] = [circle_r * math.cos(th), circle_r * math.sin(th), TARGET_ALT]
     return traj
 
 
 # ── 仿真主循环 ────────────────────────────────────────────────────────────────
-def run_formation(solvers, formation_name, mode, T_SIM_s):
+def run_formation(solvers, formation_name, mode, T_SIM_s, **params):
     """
     每步依次为每架无人机独立求解 OCP（各自独立热启）。
     目标 = leader_pos + 队形偏移；无机间耦合代价（与实机主要差异）。
@@ -146,7 +177,7 @@ def run_formation(solvers, formation_name, mode, T_SIM_s):
     labels  = form['labels']
     n       = len(offsets)
     T       = int(T_SIM_s / DT)
-    leader  = make_leader(mode, T)
+    leader  = make_leader(mode, T, **params)
 
     # 初始状态：各机已在首步队形目标位，速度=0
     states = [np.array([*(leader[0] + off), 0.0, 0.0, 0.0]) for off in offsets]
@@ -294,10 +325,10 @@ if __name__ == '__main__':
         print(f"  solver {i+1}/{MAX_DRONES} ready")
 
     results = []
-    for formation, mode, tsim, fname, title in SCENARIOS:
+    for formation, mode, tsim, fname, title, params in SCENARIOS:
         print(f"\n{'='*60}")
         print(f"  {formation} · {mode}  ({tsim}s, {int(tsim/DT)} steps)")
-        logs = run_formation(solvers, formation, mode, tsim)
+        logs = run_formation(solvers, formation, mode, tsim, **params)
         out  = plot_formation(logs, title, fname)
         ok   = print_verdict(logs, f"{formation}-{mode}")
         results.append((f"{formation}-{mode}", ok, out))
