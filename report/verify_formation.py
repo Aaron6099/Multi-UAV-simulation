@@ -38,57 +38,69 @@ OUTDIR    = os.path.join(os.path.dirname(__file__), 'figures')
 BUILD_DIR = '/tmp/acados_verify_formation'
 os.makedirs(OUTDIR,    exist_ok=True)
 os.makedirs(BUILD_DIR, exist_ok=True)
-COLORS = [f'C{i}' for i in range(10)]   # matplotlib C0-C9，支持最多10机
+COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+          'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
 
 # ── 队形偏移（scenarios.yaml formations.*.birth，z 叠 target_alt）─────────────
-def _off(xyz):
-    a = np.array(xyz, dtype=float); a[:, 2] = TARGET_ALT; return a
-
 FORMATIONS = {
     'pair2': {
-        'offsets': _off([[0,0,0], [-3,0,0]]),
+        'offsets': np.array([[  0,      0,      TARGET_ALT],
+                             [ -3,      0,      TARGET_ALT]]),
         'labels':  ['d0', 'd1'],
     },
     'trio3': {
-        'offsets': _off([[3,0,0], [-1.5,2.598,0], [-1.5,-2.598,0]]),
+        'offsets': np.array([[ 3,     0,      TARGET_ALT],
+                             [-1.5,   2.598,  TARGET_ALT],
+                             [-1.5,  -2.598,  TARGET_ALT]]),
         'labels':  ['d0', 'd1', 'd2'],
     },
-    'cross5': {                                   # 十字，对应 scenarios.yaml cross5
-        'offsets': _off([[0,0,0],[0,3,0],[0,-3,0],[3,0,0],[-3,0,0]]),
+    'cross5': {
+        'offsets': np.array([[ 0,  0,  TARGET_ALT],
+                             [ 0,  3,  TARGET_ALT],
+                             [ 0, -3,  TARGET_ALT],
+                             [ 3,  0,  TARGET_ALT],
+                             [-3,  0,  TARGET_ALT]]),
         'labels':  ['d0', 'd1', 'd2', 'd3', 'd4'],
     },
-    'grid9': {                                    # 3×3方阵，对应 scenarios.yaml grid9
-        'offsets': _off([[0,0,0],[0,3,0],[0,-3,0],[3,0,0],[-3,0,0],
-                         [3,3,0],[-3,3,0],[3,-3,0],[-3,-3,0]]),
-        'labels':  ['d0','d1','d2','d3','d4','d5','d6','d7','d8'],
+    'grid9': {
+        'offsets': np.array([[ 0,  0,  TARGET_ALT],
+                             [ 0,  3,  TARGET_ALT],
+                             [ 0, -3,  TARGET_ALT],
+                             [ 3,  0,  TARGET_ALT],
+                             [-3,  0,  TARGET_ALT],
+                             [ 3,  3,  TARGET_ALT],
+                             [-3,  3,  TARGET_ALT],
+                             [ 3, -3,  TARGET_ALT],
+                             [-3, -3,  TARGET_ALT]]),
+        'labels':  ['d0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8'],
     },
 }
 
 # ── 仿真场景 ──────────────────────────────────────────────────────────────────
-# (formation, mode, T_SIM_s, fname, title, speed, radius, lead_d, solve_budget_ms)
 SCENARIOS = [
-    ('pair2',  'hover',   40.0, 'verify_pair2_hover.png',
-     'pair2 Hover — MPC Formation Verification (standalone acados)',    0.5, 10.0, 20.0, 12.0),
-    ('pair2',  'line',    70.0, 'verify_pair2_line.png',
-     'pair2 Line v=0.5 m/s, d=20 m — MPC Formation Verification',      0.5, 10.0, 20.0, 12.0),
-    ('trio3',  'hover',   40.0, 'verify_trio3_hover.png',
-     'trio3 Hover — MPC Formation Verification (standalone acados)',    0.5, 10.0, 20.0, 12.0),
-    ('trio3',  'line',    70.0, 'verify_trio3_line.png',
-     'trio3 Line v=0.5 m/s, d=20 m — MPC Formation Verification',      0.5, 10.0, 20.0, 12.0),
-    ('trio3',  'circle',  80.0, 'verify_trio3_circle.png',
-     'trio3 Circle R=10 m, v=1.5 m/s — MPC Formation Verification',   1.5, 10.0, 20.0, 12.0),
-    ('cross5', 'hover',   40.0, 'verify_cross5_hover.png',
-     'cross5 Hover — MPC Formation Verification (standalone acados)',   0.5, 10.0, 20.0, 12.0),
-    ('cross5', 'line',    80.0, 'verify_cross5_line.png',
-     'cross5 Line v=1.0 m/s, d=20 m (S4) — MPC Formation Verification', 1.0, 10.0, 20.0, 12.0),
-    ('cross5', 'circle', 100.0, 'verify_cross5_circle.png',
-     'cross5 Circle R=10 m, v=1.0 m/s (S5) — MPC Formation Verification', 1.0, 10.0, 20.0, 12.0),
-    ('grid9',  'hover',   40.0, 'verify_grid9_hover.png',
-     'grid9 Hover — MPC Formation Verification (standalone acados)',    0.5, 10.0, 12.0, 15.0),
-    ('grid9',  'line',    85.0, 'verify_grid9_line.png',
-     'grid9 Line v=0.5 m/s, d=12 m (S7) — MPC Formation Verification', 0.5, 10.0, 12.0, 15.0),
-    ('grid9',  'circle', 165.0, 'verify_grid9_circle.png',
-     'grid9 Circle R=10 m, v=0.5 m/s (S8) — MPC Formation Verification', 0.5, 10.0, 12.0, 15.0),
+    # (formation, mode, T_SIM_s, fname, title, params)
+    ('pair2',  'hover',  40.0, 'verify_pair2_hover.png',
+     'pair2 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('pair2',  'line',   70.0, 'verify_pair2_line.png',
+     'pair2 Line v=0.5 m/s, d=20 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 20.0}),
+    ('trio3',  'hover',  40.0, 'verify_trio3_hover.png',
+     'trio3 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('trio3',  'line',   70.0, 'verify_trio3_line.png',
+     'trio3 Line v=0.5 m/s, d=20 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 20.0}),
+    ('trio3',  'circle', 80.0, 'verify_trio3_circle.png',
+     'trio3 Circle R=10 m, v=1.5 m/s — MPC Formation Verification',  {'circle_r': 10.0, 'circle_spd': 1.5}),
+    ('cross5', 'hover',  40.0, 'verify_cross5_hover.png',
+     'cross5 Hover — MPC Formation Verification (standalone acados)',  {}),
+    ('cross5', 'line',   65.0, 'verify_cross5_line.png',
+     'cross5 Line v=1.0 m/s, d=20 m — MPC Formation Verification',   {'line_spd': 1.0, 'line_dist': 20.0}),
+    ('cross5', 'circle', 110.0, 'verify_cross5_circle.png',
+     'cross5 Circle R=10 m, v=1.0 m/s — MPC Formation Verification', {'circle_r': 10.0, 'circle_spd': 1.0}),
+    ('grid9',  'hover',  40.0, 'verify_grid9_hover.png',
+     'grid9 Hover — MPC Formation Verification (standalone acados)',   {}),
+    ('grid9',  'line',   65.0, 'verify_grid9_line.png',
+     'grid9 Line v=0.5 m/s, d=12 m — MPC Formation Verification',    {'line_spd': 0.5, 'line_dist': 12.0}),
+    ('grid9',  'circle', 160.0, 'verify_grid9_circle.png',
+     'grid9 Circle R=10 m, v=0.5 m/s — MPC Formation Verification',  {'circle_r': 10.0, 'circle_spd': 0.5}),
 ]
 
 MAX_DRONES = 9  # grid9 最多 9 机
@@ -133,29 +145,29 @@ def build_solver():
 
 
 # ── leader 轨迹 ───────────────────────────────────────────────────────────────
-def make_leader(mode, T, speed=0.5, radius=10.0, lead_d=20.0):
+def make_leader(mode, T, line_spd=0.5, line_dist=20.0, circle_r=10.0, circle_spd=1.5):
     t = np.arange(T) * DT
     traj = np.zeros((T, 3))
     if mode == 'hover':
         traj[:] = [0, 0, TARGET_ALT]
     elif mode == 'line':
         for i, ti in enumerate(t):
-            if   ti < 10.0:                    traj[i] = [0,                0, TARGET_ALT]
-            elif ti < 10.0 + lead_d / speed:   traj[i] = [(ti-10.0)*speed,  0, TARGET_ALT]
-            else:                               traj[i] = [lead_d,           0, TARGET_ALT]
+            if   ti < 10.0:                         traj[i] = [0,              0, TARGET_ALT]
+            elif ti < 10.0 + line_dist / line_spd:  traj[i] = [(ti-10.0)*line_spd, 0, TARGET_ALT]
+            else:                                    traj[i] = [line_dist,      0, TARGET_ALT]
     elif mode == 'circle':
-        omega = speed / radius
+        omega = circle_spd / circle_r
         for i, ti in enumerate(t):
             if ti < 10.0:
-                traj[i] = [radius, 0, TARGET_ALT]
+                traj[i] = [circle_r, 0, TARGET_ALT]
             else:
                 th = omega * (ti - 10.0)
-                traj[i] = [radius * math.cos(th), radius * math.sin(th), TARGET_ALT]
+                traj[i] = [circle_r * math.cos(th), circle_r * math.sin(th), TARGET_ALT]
     return traj
 
 
 # ── 仿真主循环 ────────────────────────────────────────────────────────────────
-def run_formation(solvers, formation_name, mode, T_SIM_s, speed=0.5, radius=10.0, lead_d=20.0):
+def run_formation(solvers, formation_name, mode, T_SIM_s, **params):
     """
     每步依次为每架无人机独立求解 OCP（各自独立热启）。
     目标 = leader_pos + 队形偏移；无机间耦合代价（与实机主要差异）。
@@ -165,7 +177,7 @@ def run_formation(solvers, formation_name, mode, T_SIM_s, speed=0.5, radius=10.0
     labels  = form['labels']
     n       = len(offsets)
     T       = int(T_SIM_s / DT)
-    leader  = make_leader(mode, T, speed=speed, radius=radius, lead_d=lead_d)
+    leader  = make_leader(mode, T, **params)
 
     # 初始状态：各机已在首步队形目标位，速度=0
     states = [np.array([*(leader[0] + off), 0.0, 0.0, 0.0]) for off in offsets]
@@ -285,22 +297,22 @@ def plot_formation(logs, title, fname):
 
 
 # ── 判定 ──────────────────────────────────────────────────────────────────────
-def print_verdict(logs, label, solve_budget=12.0):
+def print_verdict(logs, label):
     t = logs['t']; half = len(t) // 2
     fm = logs['formation_max_err']; ms = logs['min_spacing']
     all_solve = np.concatenate([logs['per'][lb]['solve_ms'] for lb in logs['labels']])
     print(f"  [{label}]")
     print(f"    form_err  2nd-half mean={np.mean(fm[half:]):.3f} m  max={np.max(fm[half:]):.3f} m")
     print(f"    min_spacing  min={np.min(ms):.3f} m  (d_safe={D_SAFE} m)")
-    print(f"    solve  mean={np.mean(all_solve):.3f} ms  max={np.max(all_solve):.3f} ms  budget={solve_budget} ms")
+    print(f"    solve  mean={np.mean(all_solve):.3f} ms  max={np.max(all_solve):.3f} ms")
     ok_form  = np.mean(fm[half:]) < 0.5
     ok_space = np.min(ms) >= D_SAFE
-    ok_solve = np.max(all_solve) < solve_budget
-    if not ok_form:  print(f"    ⚠  form_err {np.mean(fm[half:]):.3f} m >= 0.5 m")
-    if not ok_space: print(f"    ⚠  min_spacing {np.min(ms):.3f} m < d_safe {D_SAFE} m")
-    if not ok_solve: print(f"    ⚠  solve max {np.max(all_solve):.2f} ms >= {solve_budget} ms")
+    ok_solve = np.max(all_solve) < 12.0
+    if not ok_form:  print(f"    ⚠️  form_err {np.mean(fm[half:]):.3f} m ≥ 0.5 m")
+    if not ok_space: print(f"    ⚠️  min_spacing {np.min(ms):.3f} m < d_safe {D_SAFE} m")
+    if not ok_solve: print(f"    ⚠️  solve max {np.max(all_solve):.2f} ms ≥ 12 ms")
     ok = ok_form and ok_space and ok_solve
-    print(f"    VERDICT: {'PASS' if ok else 'REVIEW'}")
+    print(f"    VERDICT: {'PASS ✅' if ok else 'REVIEW ⚠️'}")
     return ok
 
 
@@ -313,13 +325,12 @@ if __name__ == '__main__':
         print(f"  solver {i+1}/{MAX_DRONES} ready")
 
     results = []
-    for formation, mode, tsim, fname, title, speed, radius, lead_d, solve_budget in SCENARIOS:
+    for formation, mode, tsim, fname, title, params in SCENARIOS:
         print(f"\n{'='*60}")
         print(f"  {formation} · {mode}  ({tsim}s, {int(tsim/DT)} steps)")
-        logs = run_formation(solvers, formation, mode, tsim,
-                             speed=speed, radius=radius, lead_d=lead_d)
+        logs = run_formation(solvers, formation, mode, tsim, **params)
         out  = plot_formation(logs, title, fname)
-        ok   = print_verdict(logs, f"{formation}-{mode}", solve_budget=solve_budget)
+        ok   = print_verdict(logs, f"{formation}-{mode}")
         results.append((f"{formation}-{mode}", ok, out))
 
     print(f"\n{'='*60}")
