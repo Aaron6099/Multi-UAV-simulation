@@ -296,6 +296,33 @@ def plot_formation(logs, title, fname):
     return out
 
 
+# ── CSV 输出 ──────────────────────────────────────────────────────────────────
+def save_csv(logs, fname):
+    labels = logs['labels']
+    t      = logs['t']
+    leader = logs['leader']
+
+    header = ['t']
+    for lb in labels:
+        header += [f'{lb}_x', f'{lb}_y', f'{lb}_z', f'{lb}_poserr', f'{lb}_solve_ms']
+    header += ['leader_x', 'leader_y', 'leader_z', 'formation_max_err', 'min_spacing']
+
+    rows = []
+    for k in range(len(t)):
+        row = [t[k]]
+        for lb in labels:
+            p = logs['per'][lb]
+            row += [p['px'][k], p['py'][k], p['pz'][k], p['poserr'][k], p['solve_ms'][k]]
+        row += [leader[k, 0], leader[k, 1], leader[k, 2],
+                logs['formation_max_err'][k], logs['min_spacing'][k]]
+        rows.append(row)
+
+    out = os.path.join(OUTDIR, fname.replace('.png', '.csv'))
+    data = np.array(rows, dtype=float)
+    np.savetxt(out, data, delimiter=',', header=','.join(header), comments='', fmt='%.4f')
+    return out
+
+
 # ── 判定 ──────────────────────────────────────────────────────────────────────
 def print_verdict(logs, label):
     t = logs['t']; half = len(t) // 2
@@ -329,11 +356,12 @@ if __name__ == '__main__':
         print(f"\n{'='*60}")
         print(f"  {formation} · {mode}  ({tsim}s, {int(tsim/DT)} steps)")
         logs = run_formation(solvers, formation, mode, tsim, **params)
-        out  = plot_formation(logs, title, fname)
-        ok   = print_verdict(logs, f"{formation}-{mode}")
-        results.append((f"{formation}-{mode}", ok, out))
+        out     = plot_formation(logs, title, fname)
+        out_csv = save_csv(logs, fname)
+        ok      = print_verdict(logs, f"{formation}-{mode}")
+        results.append((f"{formation}-{mode}", ok, out, out_csv))
 
     print(f"\n{'='*60}")
     print("SUMMARY")
-    for name, ok, out in results:
-        print(f"  {name:30s}  {'PASS ✅' if ok else 'REVIEW ⚠️'}  → {os.path.basename(out)}")
+    for name, ok, out, out_csv in results:
+        print(f"  {name:30s}  {'PASS ✅' if ok else 'REVIEW ⚠️'}  → {os.path.basename(out)}  {os.path.basename(out_csv)}")
