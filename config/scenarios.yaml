@@ -225,6 +225,79 @@ scenarios:
              ready_hold: 20.0, ready_pos_err: 0.3}
     limits: {max_speed: 1.5, max_accel: 2.0, d_safe: 2.5}
 
+  # ══ S27+ safety_filter SITL 回归·诱发场景（真机门禁，配套 report/safety_filter_SITL回归清单.md）══
+  # 共性说明：
+  #  · 诱发类场景 verdict 预期不按常规 PASS 判（thresholds 已放宽），判定以节点日志
+  #    `SAFETY <state> <reasons>` + analyze_flight 轨迹为准；清单里写了每场景的预期日志。
+  #  · safety_* 参数在 mpc_node 构造时读一次 → 改本文件后必须 colcon build 才生效。
+  #  · ⚠️ 碰撞地板检查不受 grace 门控：诱发碰撞保护时 d_emergency/d_warn 必须 < 出生间距，
+  #    否则飞机在地面就 HOLD→RELINQUISH、起飞锁死（清单原“抬 d_emergency 到 5.5”法不可用，
+  #    这里改用 offsets_scale 缩小空中队形目标制造真实接近）。
+
+  S27_solo1_fence_line:                     # 飞散围栏·追线诱发（Phase1 第1行）
+    formation: solo1
+    leader: {mode: line, speed: 1.0, max_distance: 20.0, yaw_mode: tangent}
+    # 0.3m 压到稳态滞后以下保证触发。追线时机头速度指向参考点(v_out<0)，按 safety_filter
+    # 代码只会给 severity1 → 预期停在 DEGRADED 半速追、不升级 RELINQUISH；
+    # 预期日志: flyaway_near/flyaway_converging + SAFETY DEGRADED；leader 到头停走后
+    # 应观察到 ok_streak 达 clear_frames 回 NORMAL（迟滞降级闭环）。
+    limits: {safety_max_track_dist: 0.3}
+    thresholds: {pos_err: 99.0, total_fallbacks: 99999}
+
+  S28_solo1_fence_circle:                   # 飞散围栏·圆周诱发（径向滞后触 breach 刹车）
+    formation: solo1
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    # 圆周入轨/跟踪径向滞后远超 1m（S0 同场景须放围栏到 15 才不触发）→ 必然越界；
+    # 圆周中 v_out 周期性 >0 → 预期日志: flyaway_breach(刹外扩分量) 混 flyaway_converging，
+    # 可能间歇 HOLD。观察轨迹被“拽住”不外飞。
+    limits: {safety_max_track_dist: 1.0}
+    thresholds: {pos_err: 99.0, total_fallbacks: 99999}
+
+  S29_trio3_squeeze_warn:                   # 碰撞地板·真实接近（d_warn 带内均衡，Phase1 第3行）
+    formation: trio3
+    leader: {mode: hover}
+    # 出生间距不变(5.196m，起飞不锁死)；空中队形目标缩到 5.196*0.35≈1.82m，
+    # 落在 d_warn=2.0 与 d_emergency=1.2 之间 → 持续 collide_warn 抑制接近+排斥。
+    # 预期: 均衡间距 ≈ d_warn 附近(1.9~2.1m)，min spacing 全程 > d_emergency=1.2，
+    # 无 collide_emerg 日志；状态 DEGRADED 持续（severity1）。
+    offsets_scale: 0.35
+    thresholds: {min_spacing: 1.3, pos_err: 99.0, total_fallbacks: 99999}
+
+  S30_trio3_squeeze_emerg:                  # 碰撞地板·emerg 全停 + 多机同时 RELINQUISH（Phase1 第2行替代法 + Phase2 互不连累）
+    formation: trio3
+    leader: {mode: hover}
+    # d_emergency 抬到 2.2（< 出生间距 5.196 不锁死；> 队形目标 1.82 必触发）→ d_warn=2.7。
+    # 预期: 收敛进 2.7 先 collide_warn，进 2.2 collide_emerg 横向全停(severity2)
+    # → HOLD → ~1s → RELINQUISH（三机可能同时）。min spacing 冻结在 ≈2.1~2.2，绝不 <1.9。
+    # 顺带观察: 多机 RELINQUISH 互不连累 + PX4 是否接管（同 S31 的链路问题）。
+    offsets_scale: 0.35
+    limits: {safety_d_emergency: 2.2}
+    thresholds: {min_spacing: 1.9, pos_err: 99.0, total_fallbacks: 99999}
+
+  S31_solo1_relinquish_alt:                 # 🔴 RELINQUISH→PX4 接管链·确定性诱发（放飞门槛第3条）
+    formation: solo1
+    leader: {mode: hover}
+    # max_alt=3.0 < target_alt=5.0 → 爬升越 3m 后 fence_alt_high 压帽(severity2 持续)
+    # → HOLD(零速悬停~3m) → 1s → RELINQUISH 停发 setpoint。
+    # ⚠️ 前提: 先按 report/真机安全配置清单_FC.md 在 SITL PX4 配 COM_OF_LOSS_T/COM_OBL_RC_ACT，
+    #    QGC 肉眼确认 PX4 切 Hold/Land —— 这一步是清单头号门禁。
+    # ⚠️ 代码级预判(2026-07-03 读码): RELINQUISH 后 mpc_node 仍每帧发 OffboardControlMode
+    #    心跳(control_loop 首行)，且 5s 冷却期内继续发零速 setpoint —— COM_OF_LOSS_T 很可能
+    #    永不触发、PX4 不接管（等效无限零速 HOLD 而非交还）。若实测确认，须先决策 relinquish
+    #    语义（真停流·放弃自动恢复 vs 主动发 DO_SET_MODE Hold/Land）再上真机。
+    limits: {safety_max_alt: 3.0}
+    thresholds: {pos_err: 99.0, total_fallbacks: 99999}
+
+  S32_solo1_circle_nosafety:                # Phase0 A/B 基线：safety 关，与 S0_solo1_circle 对比
+    formation: solo1
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    limits: {safety_filter_enable: false}
+
+  S33_trio3_circle_nosafety:                # Phase0 A/B 基线：safety 关，与 S3_trio3_circle 对比
+    formation: trio3
+    leader: {mode: circle, speed: 1.5, radius: 10.0, yaw_mode: center}
+    limits: {safety_filter_enable: false}
+
 # ── 默认判定阈值（verdict.py 用；scenario.thresholds 可逐项覆盖）──────────────
 thresholds:
   min_spacing:        1.8     # 全程最小间距 > 1.8 m（< d_safe=1.5 为危险）

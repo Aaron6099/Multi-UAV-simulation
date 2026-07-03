@@ -12,6 +12,30 @@
 
 ---
 
+## SITL 执行映射（2026-07-03 Windows 端预置，场景已入 `config/scenarios.yaml` S27–S33）
+
+Ubuntu 侧：`git pull` → `colcon build` →（RELINQUISH 类先在 QGC 配 `COM_OF_LOSS_T`/`COM_OBL_RC_ACT`，见 `真机安全配置清单_FC.md`）→ 逐场景 `ros2 launch mpc_control swarm_launch.py scenario:=<名字>`，节点日志重定向存档 + `diag_monitor.py --log`。
+
+| 清单条目 | 场景 | 预期日志/现象 |
+|---|---|---|
+| Phase0 零误触发 | 既有 S0–S8（safety 默认开） | 全程无 `SAFETY` 日志 |
+| Phase0 A/B 对照 | **S32/S33**（safety 关） vs S0_solo1_circle / S3_trio3_circle | 轨迹/verdict 无实质差异 |
+| Phase1 飞散围栏（线） | **S27_solo1_fence_line** | `flyaway_near/converging` + DEGRADED 半速；leader 停走后回 NORMAL |
+| Phase1 飞散围栏（圆） | **S28_solo1_fence_circle** | `flyaway_breach` 刹外扩分量，轨迹被拽住 |
+| Phase1 碰撞地板（warn 带） | **S29_trio3_squeeze_warn** | 持续 `collide_warn`，均衡间距≈2m，无 emerg |
+| Phase1 碰撞地板（emerg 全停） | **S30_trio3_squeeze_emerg** | `collide_warn`→`collide_emerg`→HOLD→RELINQUISH，间距冻结≈2.2m |
+| Phase1+放飞门槛 RELINQUISH→PX4 | **S31_solo1_relinquish_alt** | `fence_alt_high`→HOLD→`SAFETY RELINQUISH`；**QGC 确认 PX4 接管** |
+| Phase1 估计门 | 手动：任一场景飞行中 `pkill MicroXRCEAgent` | `est_unhealthy`→零速 HOLD；断流持续→RELINQUISH |
+| Phase1 jerk | 复用 S0/S28 起步段 | 速度曲线无单帧阶跃 |
+
+**读码发现（2026-07-03，设计场景时确认，影响执行）：**
+1. **🔴 RELINQUISH 链路代码级预判为“断”**：`control_loop()` 首行无条件发 OffboardControlMode 心跳；RELINQUISH 的 5s 冷却期内还继续下发零速 setpoint（每 5s 仅断 1 帧）。PX4 `COM_OF_LOSS_T` 判定看的正是心跳流 → **预计 S31 实测“PX4 不接管”**（等效无限零速 HOLD 而非交还）。这是 P1 里“防 RELINQUISH 永卡 Hold、允许恢复”的刻意设计与“真交还”目标的冲突，**须用户决策 relinquish 语义**（真停流·放弃自动恢复 / 主动发 `DO_SET_MODE` Hold-Land / 维持零速 HOLD 并改文档口径）后才可上真机。
+2. **本清单 Phase1 原“抬 d_emergency 到 5.5”退化法不可用**：碰撞地板检查不受 grace 门控，d_emergency ≥ 出生间距会让飞机**在地面即 HOLD→RELINQUISH、起飞锁死**。S29/S30 改用 `offsets_scale: 0.35` 缩小空中队形目标制造真实接近（出生间距不动）。
+3. 顺手修复：`mpc_node.py` safety 初始化块曾被 PR#11 合并重复成两份（构建两次 SafetyFilter、日志双打），已去重（行为不变）。
+4. 各场景**实际生效**的围栏值 ≠ 节点默认 5.0：`swarm_launch.py` 对未显式设置者按 `leader max_distance×1.2` 自动推导（fallback 20m → 24m，hover/circle 也吃这个值）。但 `real_hardware_launch.py` conservative **不走这条路、真机将用 5.0 默认** —— Phase 3 标定时必须显式写回。
+
+---
+
 ## Phase 0 — 不回归（最重要：确认没帮倒忙）
 正常飞行 safety 必须**全程 NORMAL、零误触发**，且开/关 safety 的轨迹/verdict 基本一致。
 
